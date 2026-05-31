@@ -1,0 +1,16 @@
+services:
+  autobvb-muscle:
+    build: .
+    volumes:
+      - .:/app
+      - ./local_storage:/app/local_storage
+      - ./fb_browser_profile:/app/fb_browser_profile
+    command: python worker.py
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+    deploy:
+      resources:
+        limits:
+          memory: 2G

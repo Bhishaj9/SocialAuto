@@ -1,0 +1,5 @@
+browser-use==0.12.6
+cloakbrowser==0.3.28
+playwright==1.59.0
+firebase-admin
+google-cloud-storage
