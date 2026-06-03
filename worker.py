@@ -19,7 +19,6 @@ from typing import Any
 from browser_use import BrowserSession
 from cloakbrowser import launch_persistent_context_async
 
-from content_engine import generate_captions
 import database
 import storage
 
@@ -29,6 +28,7 @@ PROOF_FILE = ROOT_DIR / "proof.png"
 CDP_PORT = 9222
 CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 POLL_INTERVAL_SECONDS = 10
+SHADOW_MODE = os.getenv("SHADOW_MODE", "True").lower() in {"1", "true", "yes", "on"}
 
 FACEBOOK_ALLOWED_DOMAINS = [
     "facebook.com",
@@ -118,18 +118,16 @@ async def draft_listing(listing: dict[str, Any]) -> None:
     database.update_listing_status(listing_id, "processing")
 
     try:
-        metadata = listing.get("metadata", {})
-        if not isinstance(metadata, dict):
-            metadata = {}
+        chosen_caption = listing.get("final_text")
+        if not isinstance(chosen_caption, str) or not chosen_caption.strip():
+            raise ValueError(f"Listing {listing_id} is missing final_text from HITL approval.")
+        chosen_caption = chosen_caption.strip()
 
-        image_paths = metadata.get("image_paths")
-        if image_paths is None:
-            image_path = metadata.get("image_path")
-            image_paths = [image_path] if image_path else [str(ROOT_DIR / "proof.png")]
-        elif isinstance(image_paths, str):
+        image_paths = listing.get("image_paths", [])
+        if isinstance(image_paths, str):
             image_paths = [image_paths]
         elif not isinstance(image_paths, list):
-            image_paths = [str(image_paths)]
+            raise ValueError(f"Listing {listing_id} has invalid image_paths payload.")
 
         # Ensure all paths are absolute strings for Playwright inside Docker
         candidate_image_paths = [str(Path(p).resolve()) for p in image_paths if p and p is not None]
@@ -138,13 +136,11 @@ async def draft_listing(listing: dict[str, Any]) -> None:
         if missing_image_paths:
             print(f"[worker] Skipping missing image(s): {', '.join(missing_image_paths)}")
 
-        flat_details = metadata.get("flat_details") or listing.get("flat_details") or "2BHK Fully Furnished"
-        contact_number = metadata.get("contact_number") or listing.get("contact_number") or "+91-9876543210"
-        custom_instruction = metadata.get("custom_instruction")
-        if custom_instruction is not None:
-            custom_instruction = str(custom_instruction)
+        if not abs_image_paths:
+            raise FileNotFoundError(f"Listing {listing_id} has no readable approved image paths.")
 
-        print(f"[worker] Generating AI captions for listing {listing_id} using {len(abs_image_paths)} image(s).")
+        print(f"[worker] Loaded pre-approved caption for listing {listing_id}: {chosen_caption[:50]}...")
+        print(f"[worker] Using {len(abs_image_paths)} verified approved image(s).")
         print(f"[Debug] Current working directory: {os.getcwd()}")
 
         storage_dir = "/app/local_storage"
@@ -157,15 +153,6 @@ async def draft_listing(listing: dict[str, Any]) -> None:
                 print(f"[Debug] - {filename} | file={os.path.isfile(full_path)} | size={size} bytes")
         else:
             print(f"[Debug] WARNING: {storage_dir} does not exist. Volume mount likely failed.")
-
-        captions = generate_captions(
-            image_paths=abs_image_paths,
-            flat_details=str(flat_details),
-            contact_number=str(contact_number),
-            custom_instruction=custom_instruction,
-        )
-        chosen_caption = random.choice(captions)
-        print(f"[Worker] Selected Caption: {chosen_caption[:50]}...")
 
         if PROOF_FILE.exists():
             print(f"[worker] Removing stale proof file before new run: {PROOF_FILE}")
@@ -255,8 +242,9 @@ async def draft_listing(listing: dict[str, Any]) -> None:
         saved_path = storage.upload_proof(PROOF_FILE, destination_name)
         print(f"[worker] Proof upload simulation complete: {saved_path}")
 
-        database.update_listing_status(listing_id, "shadow_success")
-        print(f"[worker] Listing {listing_id} marked as shadow_success.")
+        success_status = "shadow_success" if SHADOW_MODE else "completed"
+        database.update_listing_status(listing_id, success_status)
+        print(f"[worker] Listing {listing_id} marked as {success_status}.")
 
     except Exception as exc:
         print(f"[worker] ERROR while processing listing {listing_id}: {exc}")

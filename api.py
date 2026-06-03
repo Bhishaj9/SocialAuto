@@ -1,23 +1,59 @@
-"""FastAPI bridge for submitting AutoBVB property listings."""
+"""FastAPI bridge for AutoBVB human-in-the-loop listing drafts."""
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import contextmanager
 import json
 import os
 import tempfile
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
+
+from niyanth import run_governed_pipeline
 
 ROOT_DIR = Path(__file__).resolve().parent
 LISTINGS_FILE = ROOT_DIR / "listings.json"
+LISTINGS_LOCK_FILE = ROOT_DIR / "listings.json.lock"
 LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", "/app/local_storage"))
 
 app = FastAPI(title="AutoBVB Listings Bridge", version="1.0.0")
 _listings_lock = threading.Lock()
+
+
+class ApproveDraftRequest(BaseModel):
+    draft_id: str = Field(..., min_length=1)
+    final_approved_text: str = Field(..., min_length=1)
+    image_paths: list[str] = Field(..., min_length=1)
+
+
+@contextmanager
+def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _load_listings() -> list[dict[str, Any]]:
@@ -41,6 +77,7 @@ def _load_listings() -> list[dict[str, Any]]:
 
 def _save_listings(listings: list[dict[str, Any]]) -> None:
     LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -56,6 +93,8 @@ def _save_listings(listings: list[dict[str, Any]]) -> None:
 
         os.replace(temp_path, LISTINGS_FILE)
     except OSError as exc:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="Unable to write listings database.") from exc
 
 
@@ -67,17 +106,17 @@ def _safe_upload_name(upload: UploadFile, index: int) -> str:
     return f"{index:02d}_{safe_stem}_{uuid.uuid4().hex}{suffix.lower()}"
 
 
-async def _save_uploaded_images(listing_id: str, images: list[UploadFile]) -> list[str]:
-    listing_dir = (LOCAL_STORAGE_DIR / "listings" / listing_id).resolve()
+async def _save_uploaded_images(draft_id: str, images: list[UploadFile]) -> list[str]:
+    draft_dir = (LOCAL_STORAGE_DIR / "drafts" / draft_id).resolve()
     saved_paths: list[str] = []
 
     try:
-        listing_dir.mkdir(parents=True, exist_ok=True)
+        draft_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise HTTPException(status_code=500, detail="Unable to create listing asset directory.") from exc
+        raise HTTPException(status_code=500, detail="Unable to create draft asset directory.") from exc
 
     for index, image in enumerate(images, start=1):
-        destination = listing_dir / _safe_upload_name(image, index)
+        destination = draft_dir / _safe_upload_name(image, index)
         try:
             image_bytes = await image.read()
             if not image_bytes:
@@ -85,7 +124,7 @@ async def _save_uploaded_images(listing_id: str, images: list[UploadFile]) -> li
 
             destination.write_bytes(image_bytes)
             saved_paths.append(str(destination))
-            print(f"[api] Saved image {index} for listing {listing_id}: {destination}")
+            print(f"[api] Saved image {index} for draft {draft_id}: {destination}")
         except HTTPException:
             raise
         except OSError as exc:
@@ -96,47 +135,67 @@ async def _save_uploaded_images(listing_id: str, images: list[UploadFile]) -> li
     return saved_paths
 
 
-@app.post("/api/listings")
-async def create_listing(
-    background_tasks: BackgroundTasks,
+@app.post("/api/generate-draft")
+async def generate_draft(
     flat_details: str = Form(...),
     contact_number: str = Form(...),
     custom_instruction: str | None = Form(None),
     images: list[UploadFile] = File(...),
 ) -> dict[str, Any]:
-    del background_tasks
-
     if not images:
         raise HTTPException(status_code=400, detail="At least one image is required.")
 
-    listing_id = uuid.uuid4().hex
-    print(f"[api] Received listing submission {listing_id} with {len(images)} image(s).")
+    draft_id = uuid.uuid4().hex
+    print(f"[api] Received draft request {draft_id} with {len(images)} image(s).")
 
-    saved_image_paths = await _save_uploaded_images(listing_id, images)
+    saved_image_paths = await _save_uploaded_images(draft_id, images)
+
+    try:
+        generated_captions = await asyncio.to_thread(
+            run_governed_pipeline,
+            saved_image_paths,
+            flat_details,
+            contact_number,
+            custom_instruction,
+        )
+    except Exception as exc:
+        print(f"[api] Draft pipeline failed for {draft_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Draft generation failed.") from exc
+
+    print(f"[api] Draft {draft_id} generated successfully for human review.")
+    return {
+        "draft_id": draft_id,
+        "image_paths": saved_image_paths,
+        "generated_captions": generated_captions,
+    }
+
+
+@app.post("/api/approve-draft")
+def approve_draft(request: ApproveDraftRequest) -> dict[str, str]:
+    print(f"[api] Approval received for draft {request.draft_id}.")
+
     listing: dict[str, Any] = {
-        "id": listing_id,
+        "id": request.draft_id,
         "status": "pending",
-        "flat_details": flat_details,
-        "contact_number": contact_number,
-        "metadata": {
-            "image_paths": saved_image_paths,
-            "custom_instruction": custom_instruction,
-        },
+        "final_text": request.final_approved_text,
+        "image_paths": request.image_paths,
     }
 
     with _listings_lock:
-        listings = _load_listings()
-        listings.append(listing)
-        _save_listings(listings)
+        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
+            listings = _load_listings()
+            listings.append(listing)
+            _save_listings(listings)
 
-    print(f"[api] Listing {listing_id} queued in {LISTINGS_FILE}. Worker can process it now.")
-    return {"id": listing_id, "status": "pending", "image_paths": saved_image_paths}
+    print(f"[api] Draft {request.draft_id} approved and queued in {LISTINGS_FILE}.")
+    return {"status": "success", "message": "Draft approved and queued for posting"}
 
 
 @app.get("/api/listings")
 def list_listings() -> dict[str, list[dict[str, Any]]]:
     with _listings_lock:
-        listings = _load_listings()
+        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
+            listings = _load_listings()
 
     print(f"[api] Returning {len(listings)} listing status record(s).")
     return {"listings": listings}
