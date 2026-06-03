@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -23,12 +24,13 @@ import database
 import storage
 
 ROOT_DIR = Path(__file__).resolve().parent
-PROFILE_DIR = "./fb_browser_profile"
 PROOF_FILE = ROOT_DIR / "proof.png"
+LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", "/app/local_storage"))
 CDP_PORT = 9222
 CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
 POLL_INTERVAL_SECONDS = 10
 SHADOW_MODE = os.getenv("SHADOW_MODE", "True").lower() in {"1", "true", "yes", "on"}
+PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 FACEBOOK_ALLOWED_DOMAINS = [
     "facebook.com",
@@ -68,23 +70,42 @@ def _read_url(url: str) -> str:
         return response.read().decode("utf-8")
 
 
-async def launch_stealth_browser() -> Any:
+def resolve_profile_paths(target_profile: str) -> tuple[str, str]:
+    if not PROFILE_ID_PATTERN.fullmatch(target_profile) or target_profile in {".", ".."}:
+        raise ValueError(f"Unsafe target_profile value: {target_profile}")
+
+    profile_root = (LOCAL_STORAGE_DIR / "profiles" / target_profile).resolve()
+    profiles_root = (LOCAL_STORAGE_DIR / "profiles").resolve()
+    if profiles_root not in profile_root.parents:
+        raise ValueError(f"target_profile resolved outside profile storage: {target_profile}")
+
+    profile_dir = profile_root / "fb_browser_profile"
+    state_json = profile_root / "fb_state.json"
+    return str(profile_dir), str(state_json)
+
+
+async def launch_stealth_browser(profile_dir: str, state_json: str, target_profile: str) -> Any:
     # Self-healing: Aggressively remove all Singleton* files in the profile
     import glob
-    profile_path = "/app/fb_browser_profile"
-    print(f"[worker] Pre-flight: Clearing locks in {profile_path}...")
-    for lock_file in glob.glob(f"{profile_path}/Singleton*"):
+
+    if not os.path.exists(state_json):
+        print(f"[worker] [ERROR] State context missing for profile: {target_profile}")
+        raise FileNotFoundError(f"State context missing for profile: {target_profile}")
+
+    print(f"[worker] Pre-flight: Clearing locks in {profile_dir}...")
+    for lock_file in glob.glob(f"{profile_dir}/Singleton*"):
         try:
             Path(lock_file).unlink()
             print(f"[worker] Deleted stale lock file: {lock_file}")
         except Exception as e:
             print(f"[worker] Failed to remove {lock_file}: {e}")
 
-    print(f"[worker] Launching cloakbrowser persistent context at {PROFILE_DIR}...")
-    (ROOT_DIR / "fb_browser_profile").mkdir(parents=True, exist_ok=True)
+    print(f"[worker] Launching cloakbrowser persistent context for profile {target_profile} at {profile_dir}...")
+    Path(profile_dir).mkdir(parents=True, exist_ok=True)
 
     context = await launch_persistent_context_async(
-        user_data_dir=PROFILE_DIR,
+        user_data_dir=profile_dir,
+        storage_state=state_json,
         headless=True,  # Changed to True for Docker compatibility
         viewport={"width": 1440, "height": 1000},
         args=[f"--remote-debugging-port={CDP_PORT}"],
@@ -118,6 +139,17 @@ async def draft_listing(listing: dict[str, Any]) -> None:
     database.update_listing_status(listing_id, "processing")
 
     try:
+        target_profile = listing.get("target_profile", "default_profile")
+        if not isinstance(target_profile, str) or not target_profile.strip():
+            target_profile = "default_profile"
+        target_profile = target_profile.strip()
+        profile_dir, state_json = resolve_profile_paths(target_profile)
+
+        if not os.path.exists(state_json):
+            print(f"[worker] [ERROR] State context missing for profile: {target_profile}")
+            database.update_listing_status(listing_id, "shadow_failed")
+            return
+
         chosen_caption = listing.get("final_text")
         if not isinstance(chosen_caption, str) or not chosen_caption.strip():
             raise ValueError(f"Listing {listing_id} is missing final_text from HITL approval.")
@@ -158,11 +190,7 @@ async def draft_listing(listing: dict[str, Any]) -> None:
             print(f"[worker] Removing stale proof file before new run: {PROOF_FILE}")
             PROOF_FILE.unlink()
 
-        context = await launch_stealth_browser()
-        auth_state_file = ROOT_DIR / "fb_state.json"
-        if auth_state_file.exists():
-            await context.add_cookies(json.loads(auth_state_file.read_text()).get("cookies", []))
-            print("[worker] Cross-OS cookies injected from fb_state.json.")
+        context = await launch_stealth_browser(profile_dir, state_json, target_profile)
 
         browser_session = build_browser_session()
 
