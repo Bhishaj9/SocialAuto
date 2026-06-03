@@ -1,15 +1,32 @@
 services:
+  autobvb-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./local_storage:/app/local_storage
+      - ./listings.json:/app/listings.json
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+
   autobvb-muscle:
     build: .
     volumes:
       - .:/app
       - ./local_storage:/app/local_storage
+      - ./listings.json:/app/listings.json
       - ./fb_browser_profile:/app/fb_browser_profile
     command: python worker.py
     env_file:
       - .env
     environment:
       PYTHONUNBUFFERED: "1"
+    depends_on:
+      - autobvb-api
     deploy:
       resources:
         limits:

@@ -122,15 +122,29 @@ async def draft_listing(listing: dict[str, Any]) -> None:
         if not isinstance(metadata, dict):
             metadata = {}
 
-        image_paths = metadata.get("image_paths") or [metadata.get("image_path")] or [str(ROOT_DIR / "proof.png")]
-        if isinstance(image_paths, str):
+        image_paths = metadata.get("image_paths")
+        if image_paths is None:
+            image_path = metadata.get("image_path")
+            image_paths = [image_path] if image_path else [str(ROOT_DIR / "proof.png")]
+        elif isinstance(image_paths, str):
             image_paths = [image_paths]
+        elif not isinstance(image_paths, list):
+            image_paths = [str(image_paths)]
+
         # Ensure all paths are absolute strings for Playwright inside Docker
-        abs_image_paths = [str(Path(p).resolve()) for p in image_paths if p and p is not None]
+        candidate_image_paths = [str(Path(p).resolve()) for p in image_paths if p and p is not None]
+        abs_image_paths = [path for path in candidate_image_paths if Path(path).exists()]
+        missing_image_paths = sorted(set(candidate_image_paths) - set(abs_image_paths))
+        if missing_image_paths:
+            print(f"[worker] Skipping missing image(s): {', '.join(missing_image_paths)}")
+
         flat_details = metadata.get("flat_details") or listing.get("flat_details") or "2BHK Fully Furnished"
         contact_number = metadata.get("contact_number") or listing.get("contact_number") or "+91-9876543210"
+        custom_instruction = metadata.get("custom_instruction")
+        if custom_instruction is not None:
+            custom_instruction = str(custom_instruction)
 
-        print(f"[worker] Generating AI captions for listing {listing_id} using image: {abs_image_paths[0]}")
+        print(f"[worker] Generating AI captions for listing {listing_id} using {len(abs_image_paths)} image(s).")
         print(f"[Debug] Current working directory: {os.getcwd()}")
 
         storage_dir = "/app/local_storage"
@@ -145,9 +159,10 @@ async def draft_listing(listing: dict[str, Any]) -> None:
             print(f"[Debug] WARNING: {storage_dir} does not exist. Volume mount likely failed.")
 
         captions = generate_captions(
-            image_path=abs_image_paths[0],
+            image_paths=abs_image_paths,
             flat_details=str(flat_details),
             contact_number=str(contact_number),
+            custom_instruction=custom_instruction,
         )
         chosen_caption = random.choice(captions)
         print(f"[Worker] Selected Caption: {chosen_caption[:50]}...")

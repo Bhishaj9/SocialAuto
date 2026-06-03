@@ -10,15 +10,41 @@ load_dotenv()
 client = genai.Client()
 
 
-def generate_captions(image_path: str, flat_details: str, contact_number: str) -> list:
-    image_file = Path(image_path)
-    if not image_file.exists():
-        raise FileNotFoundError(f"Image file not found: {image_path}")
+def generate_captions(
+    image_paths: list[str],
+    flat_details: str,
+    contact_number: str,
+    custom_instruction: str | None = None,
+) -> list[str]:
+    image_parts: list[types.Part] = []
+    missing_images: list[str] = []
 
-    image_bytes = image_file.read_bytes()
+    for image_path in image_paths:
+        image_file = Path(image_path)
+        try:
+            image_bytes = image_file.read_bytes()
+        except FileNotFoundError:
+            missing_images.append(image_path)
+            continue
+
+        image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+
+    if missing_images:
+        print(f"[content_engine] Skipping missing image(s): {', '.join(missing_images)}")
+
+    if not image_parts:
+        raise FileNotFoundError(f"No readable image files found: {', '.join(image_paths)}")
+
+    custom_instruction_block = (
+        f"\nUSER CUSTOM INSTRUCTION:\n{custom_instruction.strip()}\n"
+        if custom_instruction and custom_instruction.strip()
+        else ""
+    )
+
     prompt = f"""You are the Hermes Content Agent for AutoBVB, operating in the Noida Extension rental market. Your task is to analyze the uploaded image(s), verify them against the user-supplied input: {flat_details}, and output the final description exactly as a clean, production-ready text block for a Facebook post.
 
 CRITICAL INSTRUCTION: Do NOT use any Markdown symbols (no **, no #, no _, no `). Facebook cannot render them. Use line breaks, capital letters, and emojis for visual structure and emphasis instead.
+{custom_instruction_block}
 
 Use this exact string template formatting for your baseline facts:
 Call and WhatsApp on {contact_number} ✨Luxurious flat available for rent 
@@ -42,10 +68,7 @@ Variation 3: The Short & Urgent (Scarcity-Driven)
 """
     response = client.models.generate_content(
         model="gemini-2.5-pro",
-        contents=[
-            types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-            prompt,
-        ],
+        contents=[*image_parts, prompt],
         config=types.GenerateContentConfig(
             system_instruction=(
                 "You are working as part of an AI system, so no chit-chat and no explaining what you're doing and why. "
@@ -56,6 +79,6 @@ Variation 3: The Short & Urgent (Scarcity-Driven)
 
     return [
         variation.strip()
-        for variation in response.text.split("=== VARIATION OVER===")
+        for variation in response.text.split("=== VARIATION OVER ===")
         if variation.strip()
     ]
