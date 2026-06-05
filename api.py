@@ -79,24 +79,12 @@ def _load_listings() -> list[dict[str, Any]]:
 
 def _save_listings(listings: list[dict[str, Any]]) -> None:
     LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
 
     try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=LISTINGS_FILE.parent,
-            delete=False,
-            suffix=".tmp",
-        ) as temp_file:
-            json.dump(listings, temp_file, indent=2, ensure_ascii=False)
-            temp_file.write("\n")
-            temp_path = Path(temp_file.name)
-
-        os.replace(temp_path, LISTINGS_FILE)
+        with LISTINGS_FILE.open("w", encoding="utf-8") as file:
+            json.dump(listings, file, indent=2, ensure_ascii=False)
+            file.write("\n")
     except OSError as exc:
-        if temp_path is not None and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail="Unable to write listings database.") from exc
 
 

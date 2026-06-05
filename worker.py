@@ -22,6 +22,7 @@ from cloakbrowser import launch_persistent_context_async
 
 import database
 import storage
+import vision_map
 
 ROOT_DIR = Path(__file__).resolve().parent
 PROOF_FILE = ROOT_DIR / "proof.png"
@@ -105,11 +106,16 @@ async def launch_stealth_browser(profile_dir: str, state_json: str, target_profi
 
     context = await launch_persistent_context_async(
         user_data_dir=profile_dir,
-        storage_state=state_json,
         headless=True,  # Changed to True for Docker compatibility
-        viewport={"width": 1440, "height": 1000},
+        viewport={"width": 1280, "height": 720},
         args=[f"--remote-debugging-port={CDP_PORT}"],
     )
+
+    if os.path.exists(state_json):
+        with open(state_json, "r", encoding="utf-8") as file:
+            state_data = json.load(file)
+            cookies = state_data.get("cookies", state_data) if isinstance(state_data, dict) else state_data
+            await context.add_cookies(cookies)
 
     await wait_for_cdp_endpoint()
     return context
@@ -202,8 +208,11 @@ async def draft_listing(listing: dict[str, Any]) -> None:
         async with pw_api.async_playwright() as p:
             browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
             # Grab the existing context or configure a standard clean context handle
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            context = browser.contexts[0] if browser.contexts else await browser.new_context(
+                viewport={"width": 1280, "height": 720}
+            )
             page = await context.new_page()
+            await page.set_viewport_size({"width": 1280, "height": 720})
             
             try:
                 # 1. Navigate and wait for feed to load
@@ -215,33 +224,34 @@ async def draft_listing(listing: dict[str, Any]) -> None:
                     await page.keyboard.press("Escape")
                     await page.wait_for_timeout(500)
 
-                # 2. Robust Locator Strategy
-                # We look for ANY button containing "What" and role="button"
-                # This ignores the specific "Gaurav" part of the string
-                composer_locator = page.locator('div[role="button"]:has-text("What")').first
-                
-                # 3. Attempt to click with aggressive force and retries
-                try:
-                    await composer_locator.click(force=True, timeout=10000)
-                    print("[worker] Successfully opened the Facebook composer.")
-                except Exception as e:
-                    # If that fails, try a broader fallback
-                    print(f"[worker] First composer click failed, trying fallback: {e}")
-                    fallback = page.locator('div[role="button"]').filter(has_text="What").first
-                    await fallback.click(force=True)
+                composer_x, composer_y = await vision_map.get_visual_target(
+                    page,
+                    "facebook_composer_trigger",
+                    "the Facebook feed composer trigger that opens the post composer, commonly labeled like What is on your mind",
+                )
+                await page.mouse.click(composer_x, composer_y)
+                print("[worker] Successfully opened the Facebook composer via vision map.")
 
                 await page.wait_for_timeout(3000)
                 
-                # 3. Bulk Upload Images via the hidden input
-                file_input = page.locator('input[type="file"][accept*="image"]').first
-                await file_input.set_input_files(abs_image_paths)
+                upload_x, upload_y = await vision_map.get_visual_target(
+                    page,
+                    "facebook_composer_photo_upload",
+                    "the Photo/video button inside the open Facebook post composer used to attach listing images",
+                )
+                async with page.expect_file_chooser() as file_chooser_info:
+                    await page.mouse.click(upload_x, upload_y)
+                file_chooser = await file_chooser_info.value
+                await file_chooser.set_files(abs_image_paths)
                 print(f"[worker] Attached {len(abs_image_paths)} images directly to DOM input.")
                 await page.wait_for_timeout(random.randint(5000, 7000))
                 
-                # 4. Inject Text using actual keyboard simulation
-                # This triggers all the necessary React/Lexical input events
-                editor_locator = page.locator('[contenteditable="true"]').first
-                await editor_locator.click()
+                editor_x, editor_y = await vision_map.get_visual_target(
+                    page,
+                    "facebook_composer_text_area",
+                    "the main editable text area inside the open Facebook post composer where the caption should be typed",
+                )
+                await page.mouse.click(editor_x, editor_y)
                 await page.wait_for_timeout(500)
                 
                 # Type the caption with a human-like delay between characters
@@ -249,6 +259,16 @@ async def draft_listing(listing: dict[str, Any]) -> None:
                 await page.keyboard.type(chosen_caption, delay=20) 
                 print("[worker] Injected caption via keyboard emulation.")
                 await page.wait_for_timeout(2000)
+
+                if not SHADOW_MODE:
+                    post_x, post_y = await vision_map.get_visual_target(
+                        page,
+                        "facebook_composer_post_button",
+                        "the final Post button in the Facebook composer used to confirm publishing the listing",
+                    )
+                    await page.mouse.click(post_x, post_y)
+                    print("[worker] Submitted Facebook post via vision map.")
+                    await page.wait_for_timeout(random.randint(5000, 7000))
                 
                 # 5. Capture Proof
                 await page.screenshot(path="/app/proof.png")

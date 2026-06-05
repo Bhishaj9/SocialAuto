@@ -10,7 +10,6 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
-import tempfile
 import threading
 from typing import Any, Iterator
 
@@ -60,25 +59,10 @@ def _load_listings() -> list[dict[str, Any]]:
 
 def _save_listings(listings: list[dict[str, Any]]) -> None:
     LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
 
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=LISTINGS_FILE.parent,
-            delete=False,
-            suffix=".tmp",
-        ) as temp_file:
-            json.dump(listings, temp_file, indent=2, ensure_ascii=False)
-            temp_file.write("\n")
-            temp_path = Path(temp_file.name)
-
-        os.replace(temp_path, LISTINGS_FILE)
-    except OSError:
-        if temp_path is not None and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-        raise
+    with open(LISTINGS_FILE, "w", encoding="utf-8") as file:
+        json.dump(listings, file, indent=2, ensure_ascii=False)
+        file.write("\n")
 
 
 def get_pending_listing() -> dict[str, Any] | None:
