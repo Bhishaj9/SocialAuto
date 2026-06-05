@@ -6,17 +6,22 @@ import os
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 import content_engine
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else genai.Client()
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+_model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash",
+    system_instruction=(
+        "You are the AutoBVB Asset Manager. Return only YES or NO. "
+        "Do not add explanations, punctuation, or extra words."
+    )
+)
 
 
-def _read_image_parts(image_paths: list[str], max_images: int = 2) -> list[types.Part]:
-    image_parts: list[types.Part] = []
+def _read_image_parts(image_paths: list[str], max_images: int = 2) -> list[dict]:
+    image_parts: list[dict] = []
 
     for image_path in image_paths[:max_images]:
         try:
@@ -28,7 +33,7 @@ def _read_image_parts(image_paths: list[str], max_images: int = 2) -> list[types
             print(f"[Asset Manager] Could not read image during validation: {image_path} | {exc}")
             continue
 
-        image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+        image_parts.append({"mime_type": "image/jpeg", "data": image_bytes})
 
     return image_parts
 
@@ -47,18 +52,11 @@ def validate_assets(image_paths: list[str]) -> bool:
         return False
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
+        response = _model.generate_content(
             contents=[
                 *image_parts,
                 "Are these images valid real estate/property photos? Reply with only 'YES' or 'NO'.",
             ],
-            config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are the AutoBVB Asset Manager. Return only YES or NO. "
-                    "Do not add explanations, punctuation, or extra words."
-                )
-            ),
         )
     except Exception as exc:
         print(f"[Asset Manager] Gemini validation failed gracefully: {exc}")

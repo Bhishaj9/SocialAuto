@@ -6,3 +6,5 @@ python-multipart
 playwright==1.59.0
 firebase-admin
 google-cloud-storage
+google-generativeai
+python-dotenv

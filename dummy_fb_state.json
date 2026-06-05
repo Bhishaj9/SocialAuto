@@ -1,0 +1,22 @@
+[
+  {
+    "name": "c_user",
+    "value": "dummy-user",
+    "domain": ".facebook.com",
+    "path": "/",
+    "expires": 1780728048,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "xs",
+    "value": "dummy-session",
+    "domain": ".facebook.com",
+    "path": "/",
+    "expires": 1780728048,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  }
+]

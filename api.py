@@ -119,6 +119,11 @@ def _profile_dir(profile_id: str) -> Path:
 
 
 def _write_json_atomic(destination: Path, payload: Any) -> None:
+    """Atomic write via temp-file + os.replace.
+
+    Safe for normal host-side paths.  Do NOT call this for paths that live
+    on a Docker bind-mount overlay — use a direct open() write there instead.
+    """
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
 
@@ -272,7 +277,23 @@ async def upload_account_state(
         await file.close()
 
     with _exclusive_file_lock(lock_path):
-        _write_json_atomic(state_path, parsed_state)
+        # Direct truncate-and-write pattern: intentionally avoids os.replace()
+        # rename semantics, which the Linux kernel rejects across Docker
+        # bind-mount overlay layers (EXDEV / "Invalid cross-device link").
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump(parsed_state, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+        except OSError as exc:
+            print(
+                f"[api] ERROR writing state file — "
+                f"path={state_path!r} errno={exc.errno} strerror={exc.strerror!r}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unable to write state file: {exc.strerror}",
+            ) from exc
 
     print(f"[api] Account profile {safe_profile_id} initialized at {state_path}.")
     return {

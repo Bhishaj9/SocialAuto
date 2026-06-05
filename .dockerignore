@@ -1,0 +1,17 @@
+# Ignore old global browser profile
+fb_browser_profile/
+fb_browser_profile
+
+# Ignore our new dynamic local storage (drafts, proofs, new profiles)
+local_storage/
+local_storage
+
+# Ignore the runtime database (mounted as volume anyway)
+listings.json
+listings.json.lock
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env

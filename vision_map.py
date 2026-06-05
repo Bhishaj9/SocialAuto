@@ -4,18 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 UI_MAP_FILE = Path("/app/local_storage/ui_map.json")
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 720
 
-_client = genai.Client()
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+_model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash",
+    system_instruction=(
+        "You are a visual UI landmark detector. Return only JSON coordinates. "
+        "Do not include markdown, prose, labels, or explanations."
+    )
+)
 
 
 def _load_cache() -> dict[str, Any]:
@@ -73,8 +80,7 @@ def _extract_coordinate(response_text: str) -> tuple[int, int]:
 
 
 def _resolve_with_gemini(snapshot: bytes, element_key: str, description: str) -> tuple[int, int]:
-    prompt = f"""
-Return only strict JSON in this exact shape: {{"x": int, "y": int}}.
+    prompt = f"""Return only strict JSON in this exact shape: {{"x": int, "y": int}}.
 
 The image is a 1280x720 browser viewport. Identify the center pixel coordinate
 for this UI target:
@@ -84,18 +90,11 @@ description: {description}
 
 The coordinate must be within 0 <= x < 1280 and 0 <= y < 720.
 """
-    response = _client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[
-            types.Part.from_bytes(data=snapshot, mime_type="image/jpeg"),
-            prompt,
-        ],
-        config=types.GenerateContentConfig(
+    image_part = {"mime_type": "image/jpeg", "data": snapshot}
+    response = _model.generate_content(
+        contents=[image_part, prompt],
+        generation_config=genai.types.GenerationConfig(
             response_mime_type="application/json",
-            system_instruction=(
-                "You are a visual UI landmark detector. Return only JSON coordinates. "
-                "Do not include markdown, prose, labels, or explanations."
-            ),
         ),
     )
     return _extract_coordinate(response.text)

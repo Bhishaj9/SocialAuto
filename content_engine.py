@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import google.generativeai as genai
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 load_dotenv()
-client = genai.Client()
+
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+_model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash",
+    system_instruction=(
+        "You are working as part of an AI system, so no chit-chat and no explaining what you're doing and why. "
+        "DO NOT start with 'Okay', or 'Alright' or any preambles. Just the output, please."
+    )
+)
 
 
 def generate_captions(
@@ -16,7 +24,7 @@ def generate_captions(
     contact_number: str,
     custom_instruction: str | None = None,
 ) -> list[str]:
-    image_parts: list[types.Part] = []
+    image_parts: list[dict] = []
     missing_images: list[str] = []
 
     for image_path in image_paths:
@@ -27,7 +35,7 @@ def generate_captions(
             missing_images.append(image_path)
             continue
 
-        image_parts.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
+        image_parts.append({"mime_type": "image/jpeg", "data": image_bytes})
 
     if missing_images:
         print(f"[content_engine] Skipping missing image(s): {', '.join(missing_images)}")
@@ -45,7 +53,6 @@ def generate_captions(
 
 CRITICAL INSTRUCTION: Do NOT use any Markdown symbols (no **, no #, no _, no `). Facebook cannot render them. Use line breaks, capital letters, and emojis for visual structure and emphasis instead.
 {custom_instruction_block}
-
 Use this exact string template formatting for your baseline facts:
 Call and WhatsApp on {contact_number} ✨Luxurious flat available for rent 
 📍Location: Noida Extension 
@@ -66,15 +73,8 @@ Variation 1: The Gold Standard (Professional & Structured)
 Variation 2: The Lifestyle Narrative (Conversational)
 Variation 3: The Short & Urgent (Scarcity-Driven)
 """
-    response = client.models.generate_content(
-        model="gemini-2.5-pro",
+    response = _model.generate_content(
         contents=[*image_parts, prompt],
-        config=types.GenerateContentConfig(
-            system_instruction=(
-                "You are working as part of an AI system, so no chit-chat and no explaining what you're doing and why. "
-                "DO NOT start with 'Okay', or 'Alright' or any preambles. Just the output, please."
-            )
-        ),
     )
 
     return [
