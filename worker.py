@@ -194,25 +194,20 @@ def _resolve_profile(target_profile: str) -> Path:
 async def _launch_context(
     playwright_instance,
     state_file: Path,
-) -> tuple[Browser, BrowserContext]:
-    """Launch a Playwright Chromium browser and create a stealth context.
+    profile_id: str,
+) -> tuple[Browser | None, BrowserContext]:
+    """Launch a Playwright Chromium browser and create a persistent stealth context.
 
-    Uses the two-step pattern: chromium.launch() + browser.new_context()
-    because launch_persistent_context() does NOT support the storage_state
-    parameter.  Injects authenticated Facebook cookies from the profile's
-    fb_state.json via new_context(storage_state=...), which correctly
-    restores cookies, localStorage, and sessionStorage in one shot.
+    Uses Playwright's launch_persistent_context() to map the browser cache
+    directly to ROOT_DIR / "fb_browser_profile" / profile_id, with headless=False
+    and stealth configuration.
     """
-    print(f"[Worker] Launching stealth Chromium browser (headless={HEADLESS})...")
+    user_data_dir = ROOT_DIR / "fb_browser_profile" / profile_id
+    print(f"[Worker] Launching persistent stealth Chromium browser (headless=False)...")
     print(f"[Worker]   User-Agent: {STEALTH_USER_AGENT[:60]}...")
     print(f"[Worker]   Viewport:   {VIEWPORT['width']}x{VIEWPORT['height']}")
     print(f"[Worker]   State file: {state_file}")
-
-    browser = await playwright_instance.chromium.launch(
-        headless=HEADLESS,
-        args=STEALTH_CHROMIUM_ARGS,
-        ignore_default_args=["--enable-automation"],
-    )
+    print(f"[Worker]   User Data:  {user_data_dir}")
 
     # Read the state file and normalise to Playwright's expected format.
     # Playwright expects {"cookies": [...], "origins": [...]}.
@@ -222,17 +217,30 @@ async def _launch_context(
         # Flat cookie array → wrap into Playwright storage_state structure.
         raw_state = {"cookies": raw_state, "origins": []}
 
-    context = await browser.new_context(
+    context = await playwright_instance.chromium.launch_persistent_context(
+        user_data_dir=user_data_dir,
+        headless=False,
+        args=STEALTH_CHROMIUM_ARGS,
+        ignore_default_args=["--enable-automation"],
         viewport=VIEWPORT,
         user_agent=STEALTH_USER_AGENT,
-        storage_state=raw_state,
         bypass_csp=True,
         locale="en-US",
         timezone_id="Asia/Kolkata",
     )
 
+    # Manually inject the cookies and local storage state into the persistent context
+    # since launch_persistent_context doesn't directly support the storage_state parameter.
+    if "cookies" in raw_state:
+        await context.add_cookies(raw_state["cookies"])
+        print(f"[Worker] Injected {len(raw_state['cookies'])} cookies manually into context.")
+
+    # Note: Local storage from raw_state["origins"] will be injected on navigation or is already
+    # persisted if we previously logged in. To do dynamic injection of origins/localStorage,
+    # it must be done page-by-page or let the browser persistence handle it.
+
     print("[Worker] Browser context initialized with stealth fingerprint masking.")
-    return browser, context
+    return None, context
 
 
 # ── Native Text Paste (JavaScript Clipboard Injection) ───────────────────────
@@ -375,7 +383,7 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
         state_file = _resolve_profile(target_profile)
 
         async with async_playwright() as pw:
-            browser, context = await _launch_context(pw, state_file)
+            browser, context = await _launch_context(pw, state_file, target_profile)
             page: Page = await context.new_page()
             await page.set_viewport_size(VIEWPORT)
 
@@ -388,6 +396,32 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
             for _ in range(3):
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(300)
+
+            # Wait a brief moment to allow Facebook client-side redirection to happen.
+            # If the URL changes to a checkpoint, login, or two-step page, or if a login input is visible, trigger the pause.
+            checkpoint_detected = False
+            for _ in range(25):  # check over 5 seconds (25 * 200ms)
+                current_url = page.url.lower()
+                if any(k in current_url for k in ["checkpoint", "login", "two_step_verification"]):
+                    checkpoint_detected = True
+                    break
+                try:
+                    if await page.locator("input#email, input[name='email']").is_visible():
+                        checkpoint_detected = True
+                        break
+                except Exception:
+                    pass
+                try:
+                    if await page.get_by_text("What's on your mind", exact=False).first.is_visible():
+                        break
+                except Exception:
+                    pass
+                await page.wait_for_timeout(200)
+
+            if checkpoint_detected:
+                print("\n[HUMAN INTERVENTION REQUIRED] 2FA/CAPTCHA window active! You have 2 minutes to manually clear the checkpoint in the opened browser window...")
+                await asyncio.sleep(120)
+                print("[Worker] Resuming execution after human intervention window...")
 
             # ── Open the post composer ───────────────────────────────────
             print("[Worker] Locating and opening the post composer...")

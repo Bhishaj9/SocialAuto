@@ -3,13 +3,15 @@ session_capture.py
 
 Captures a fully authenticated Facebook session using standard Playwright with
 the system's native Google Chrome, falling back to Microsoft Edge if needed.
+Injects comprehensive anti-detection masking and init scripts to defeat automated detection.
 
 Workflow:
   1. Wipe any corrupted profile directory for a 100% clean slate.
-  2. Launch a visible, persistent native browser profile.
-  3. Open a blank page so you can navigate to Facebook manually.
-  4. Wait until you close the browser window or press Ctrl+C.
-  5. Save cookies + localStorage to fb_state.json.
+  2. Launch a visible, persistent native browser profile with high-stealth arguments.
+  3. Hook JS injection layer on page creation.
+  4. Navigate directly to Facebook.
+  5. Wait for up to 180 seconds or until the window is closed.
+  6. Save cookies + localStorage to fb_state.json.
 """
 
 import json
@@ -26,7 +28,7 @@ from playwright.sync_api import sync_playwright
 # Configuration
 # ---------------------------------------------------------------------------
 PROFILE_DIR = "./fb_browser_profile"
-STATE_FILE = "fb_state.json"
+STATE_FILE = "local_storage/profiles/test_agent_01/fb_state.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,14 +62,35 @@ def launch_native_persistent_context(playwright):
     """Launch native Chrome first, then native Edge if Chrome is unavailable."""
     last_error = None
 
+    # High-stealth Chromium launch flags
+    stealth_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--use-fake-ui-for-media-stream",
+        "--disable-infobars",
+        "--no-sandbox",
+    ]
+
+    # Real-world User-Agent string
+    user_agent = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    )
+
+    # Viewport mapping
+    viewport = {"width": 1280, "height": 720}
+
     for channel in ("chrome", "msedge"):
         try:
             print(f"[*] Launching persistent browser with channel='{channel}' ...")
             context = playwright.chromium.launch_persistent_context(
                 user_data_dir=str(Path(PROFILE_DIR).resolve()),
                 channel=channel,
-                headless=False,
-                ignore_default_args=["--no-sandbox"],
+                headless=False,  # Hardcoded visible browser
+                args=stealth_args,
+                ignore_default_args=["--enable-automation"],
+                user_agent=user_agent,
+                viewport=viewport,
             )
             print(f"[+] Browser launched using channel='{channel}'.")
             return context
@@ -120,30 +143,51 @@ def main() -> None:
 
             # Open a blank page; navigate to Facebook manually in the browser.
             try:
-                context.new_page()
-                print("[*] Blank page opened. Type https://www.facebook.com in the address bar.")
-                print("[*] This avoids SPA navigation hangs from automated goto().")
+                page = context.new_page()
+                
+                # Javascript Injection Layer right after the context page is opened
+                page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    window.chrome = { runtime: {} };
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                """)
+                
+                print("[*] Navigating directly to https://www.facebook.com...")
+                page.goto("https://www.facebook.com")
             except Exception as e:
-                print(f"[!] Could not open page: {e}")
+                print(f"[!] Could not open page or navigate: {e}")
 
             print()
             print("[!] Browser is now open and visible.")
             print("[!] Log in to Facebook, clear any 2FA, dismiss 'Save Device' pop-ups.")
+            print("[!] You have 180 seconds to complete the login/checkpoint...")
             print("[!] Close the browser window when finished, or press Ctrl+C here.")
             print()
             print("[*] Waiting for you to finish...")
 
-            # Wait until the user closes the browser or interrupts the script.
+            # Wait until the user closes the browser or interrupts the script or times out.
+            start_time = time.time()
             disconnected = False
+            last_print_time = 0
             while not _shutting_down and not disconnected:
+                elapsed = time.time() - start_time
+                if elapsed > 180:
+                    print(f"\n[*] 180-second timeout reached. Saving state...")
+                    break
                 try:
-                    browser = context.browser
-                    if browser is None or not browser.is_connected():
+                    # Check if pages exist to see if browser is closed
+                    if not context.pages:
                         disconnected = True
                         break
                 except Exception:
                     disconnected = True
                     break
+                
+                # Print progress update
+                if int(elapsed) // 10 > last_print_time:
+                    last_print_time = int(elapsed) // 10
+                    print(f"    [Time elapsed: {int(elapsed)}s / 180s]")
+                    
                 time.sleep(1)
 
             print("\n[*] Saving session state ...")

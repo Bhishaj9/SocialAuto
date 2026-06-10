@@ -15,7 +15,7 @@ LISTINGS_FILE = ROOT_DIR / "listings.json"
 DUMMY_IMAGE_FILE = ROOT_DIR / "dummy_flat.jpg"
 DUMMY_STATE_FILE = ROOT_DIR / "dummy_fb_state.json"
 TARGET_PROFILE = "test_agent_01"
-POLL_SECONDS = 30
+POLL_SECONDS = 180
 POLL_INTERVAL_SECONDS = 2
 
 

@@ -48,7 +48,7 @@ DUMMY_IMAGE = PROJECT_DIR / "dummy_flat.jpg"
 SERVER_STARTUP_WAIT = 5
 WORKER_STARTUP_WAIT = 3
 E2E_TIMEOUT = 300               # max seconds for the e2e wrapper
-MONITOR_TIMEOUT = 180            # max seconds to observe final state (includes e2e runtime)
+MONITOR_TIMEOUT = 240            # max seconds to observe final state (includes e2e runtime)
 MONITOR_INTERVAL = 2
 
 REQUIRED_SIGNATURES = [
