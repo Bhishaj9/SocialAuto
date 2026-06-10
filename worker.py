@@ -290,7 +290,7 @@ async def _paste_text_native(page: Page, text: str) -> None:
 
 # ── Native Image Upload (Playwright File Chooser) ───────────────────────────
 
-async def _upload_images_native(page: Page, image_paths: list[str]) -> None:
+async def _upload_images_native(page: Page, image_paths: list[str], dialog: Any = None) -> None:
     """Attach images to the Facebook composer via Playwright's file chooser API.
 
     Clicks the 'Photo/video' button and intercepts the OS file dialog using
@@ -299,7 +299,13 @@ async def _upload_images_native(page: Page, image_paths: list[str]) -> None:
     """
     # Locate the Photo/video attachment trigger.
     # Facebook's composer surfaces this as an aria-label or visible text button.
-    photo_button = page.get_by_label("Photo/video", exact=False).first
+    if dialog:
+        photo_button = dialog.locator('text="Photo/video"').first
+        if not await photo_button.is_visible():
+            photo_button = dialog.get_by_label("Photo/video", exact=False).first
+    else:
+        photo_button = page.get_by_label("Photo/video", exact=False).first
+        
     if not await photo_button.is_visible():
         # Fallback: try the text-based locator
         photo_button = page.get_by_text("Photo/video", exact=False).first
@@ -427,22 +433,30 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
             print("[Worker] Locating and opening the post composer...")
             composer_trigger = page.get_by_text("What's on your mind", exact=False).first
             await composer_trigger.click()
-            print("[Worker] Waiting for Create Post modal dialog...")
-            await page.wait_for_selector("div[role='dialog']")
+            dialog = page.locator("div[role='dialog']")
+            await dialog.wait_for(state="visible", timeout=15000)
             await page.wait_for_timeout(random.randint(1000, 2000))
 
             # ── Upload images via native file chooser ────────────────────
-            await _upload_images_native(page, abs_image_paths)
+            await _upload_images_native(page, abs_image_paths, dialog=dialog)
 
             # ── Focus the text editor and paste caption ──────────────────
             print("[Worker] Focusing composer text area...")
             # After image upload, the composer editor should be visible.
             # Click into the editable area to ensure focus.
-            editor = page.get_by_role("textbox", name="What's on your mind").first
+            editor = dialog.get_by_role("textbox", name="What's on your mind").first if dialog else page.get_by_role("textbox", name="What's on your mind").first
             if not await editor.is_visible():
                 # Fallback: look for the contenteditable div
-                editor = page.locator('[contenteditable="true"][role="textbox"]').first
-            await editor.click()
+                editor = dialog.locator('[contenteditable="true"][role="textbox"]').first if dialog else page.locator('[contenteditable="true"][role="textbox"]').first
+            
+            try:
+                await editor.click(timeout=5000)
+            except Exception as e:
+                print(f"[Worker] Basic editor click failed ({e}). Attempting force click and focus override...")
+                try:
+                    await editor.click(force=True)
+                except Exception:
+                    await editor.focus()
             await page.wait_for_timeout(500)
 
             # ── Native clipboard paste ───────────────────────────────────

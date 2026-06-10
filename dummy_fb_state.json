@@ -4,7 +4,7 @@
     "value": "dummy-user",
     "domain": ".facebook.com",
     "path": "/",
-    "expires": 1781213317,
+    "expires": 1781215106,
     "httpOnly": true,
     "secure": true,
     "sameSite": "Lax"
@@ -14,7 +14,7 @@
     "value": "dummy-session",
     "domain": ".facebook.com",
     "path": "/",
-    "expires": 1781213317,
+    "expires": 1781215106,
     "httpOnly": true,
     "secure": true,
     "sameSite": "Lax"

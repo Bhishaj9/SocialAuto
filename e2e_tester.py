@@ -51,29 +51,34 @@ def create_dummy_files() -> None:
         b"\xff\xd9"
     )
 
-    dummy_cookies = [
-        {
-            "name": "c_user",
-            "value": "dummy-user",
-            "domain": ".facebook.com",
-            "path": "/",
-            "expires": int(time.time()) + 86400,
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "Lax",
-        },
-        {
-            "name": "xs",
-            "value": "dummy-session",
-            "domain": ".facebook.com",
-            "path": "/",
-            "expires": int(time.time()) + 86400,
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "Lax",
-        },
-    ]
-    DUMMY_STATE_FILE.write_text(json.dumps(dummy_cookies, indent=2), encoding="utf-8")
+    real_state_file = ROOT_DIR / "local_storage" / "profiles" / TARGET_PROFILE / "fb_state.json"
+    if real_state_file.is_file():
+        print(f"[TEST] Found real session state at {real_state_file}. Syncing for E2E upload...")
+        DUMMY_STATE_FILE.write_text(real_state_file.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        dummy_cookies = [
+            {
+                "name": "c_user",
+                "value": "dummy-user",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": int(time.time()) + 86400,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            },
+            {
+                "name": "xs",
+                "value": "dummy-session",
+                "domain": ".facebook.com",
+                "path": "/",
+                "expires": int(time.time()) + 86400,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            },
+        ]
+        DUMMY_STATE_FILE.write_text(json.dumps(dummy_cookies, indent=2), encoding="utf-8")
 
 
 def upload_profile_state() -> None:
