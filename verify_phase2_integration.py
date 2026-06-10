@@ -131,7 +131,7 @@ def main() -> None:
     stop_event = threading.Event()
 
     print("=" * 72)
-    print("  AutoBVB ✦ Phase 2 Multi-Process Integration Test (v2)")
+    print("  AutoBVB * Phase 2 Multi-Process Integration Test (v2)")
     print("=" * 72)
     print(f"  Python          : {PYTHON}")
     print(f"  Project         : {PROJECT_DIR}")
