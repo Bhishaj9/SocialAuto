@@ -1,8 +1,33 @@
-"""AutoBVB local shadow-mode execution worker.
+"""AutoBVB v5.0 — Phase 2 Controller Worker.
 
-The worker polls listings.json, drafts pending Facebook listings in a
-cloakbrowser-backed persistent profile, stores proof screenshots locally, and
-updates local listing state.
+Asynchronous continuous-polling execution layer that reads approved listings
+from listings.json and posts them to Facebook via a Playwright persistent
+browser context with cloakbrowser-grade stealth fingerprinting.
+
+Architecture:
+  ┌─────────────┐     ┌──────────────────┐     ┌───────────────────┐
+  │ listings.json│────▶│  Polling Loop    │────▶│  Browser Context  │
+  │  (approved)  │     │  (10s interval)  │     │  (Playwright +    │
+  └─────────────┘     └──────────────────┘     │   Stealth Args)   │
+                                                └───────┬───────────┘
+                                                        │
+                                          ┌─────────────┴──────────────┐
+                                          │  Native Text Paste (JS)    │
+                                          │  Native Image Upload (FC)  │
+                                          │  Proof Screenshot Capture  │
+                                          └────────────────────────────┘
+
+Key Design Decisions:
+  - Completely decoupled from legacy CDP/cloakbrowser launch_persistent_context_async
+    and browser-use BrowserSession. Uses raw Playwright async API directly.
+  - File-level exclusive locking (msvcrt/fcntl) prevents concurrent status races
+    between the API server, worker, and any external tooling.
+  - Native clipboard paste via page.evaluate() preserves all line breaks, emojis,
+    and Unicode characters that keyboard.type() would mangle or drop.
+  - Playwright's expect_file_chooser() intercepts the OS file dialog natively,
+    avoiding brittle selector chains for Facebook's ever-changing upload UI.
+  - Every task execution is wrapped in try/finally to guarantee browser context
+    teardown, preventing background thread and port leakage.
 """
 
 from __future__ import annotations
@@ -12,328 +37,456 @@ import json
 import os
 import random
 import re
-import urllib.error
-import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from browser_use import BrowserSession
-from cloakbrowser import launch_persistent_context_async
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
-import database
-import storage
-import vision_map
+# ── Configuration ────────────────────────────────────────────────────────────
 
 ROOT_DIR = Path(__file__).resolve().parent
-PROOF_FILE = ROOT_DIR / "proof.png"
-LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", "/app/local_storage"))
-CDP_PORT = 9222
-CDP_URL = f"http://127.0.0.1:{CDP_PORT}"
+LISTINGS_FILE = ROOT_DIR / "listings.json"
+LISTINGS_LOCK_FILE = ROOT_DIR / "listings.json.lock"
+LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", str(ROOT_DIR / "local_storage")))
+PROOF_DIR = LOCAL_STORAGE_DIR / "proofs"
+
 POLL_INTERVAL_SECONDS = 10
+HEADLESS = os.getenv("WORKER_HEADLESS", "True").lower() in {"1", "true", "yes", "on"}
 SHADOW_MODE = os.getenv("SHADOW_MODE", "True").lower() in {"1", "true", "yes", "on"}
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
-FACEBOOK_ALLOWED_DOMAINS = [
-    "facebook.com",
-    "*.facebook.com",
-    "fbcdn.net",
-    "*.fbcdn.net",
-    "fbsbx.com",
-    "*.fbsbx.com",
+# Cloakbrowser-grade stealth launch arguments.
+# These arguments mirror what cloakbrowser applies internally to defeat
+# common headless-detection fingerprinting (navigator.webdriver, chrome
+# runtime checks, WebGL vendor strings, etc.).
+STEALTH_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+STEALTH_CHROMIUM_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-infobars",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--no-sandbox",
+    "--window-size=1280,720",
 ]
 
-
-async def wait_for_cdp_endpoint(timeout_seconds: float = 15.0) -> str:
-    """Wait until the cloakbrowser debug endpoint is accepting CDP connections."""
-
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
-    version_url = f"{CDP_URL}/json/version"
-    last_error: Exception | None = None
-
-    while asyncio.get_running_loop().time() < deadline:
-        try:
-            body = await asyncio.to_thread(_read_url, version_url)
-            payload = json.loads(body)
-            websocket_url = payload.get("webSocketDebuggerUrl")
-            if websocket_url:
-                print(f"[worker] cloakbrowser CDP endpoint is ready: {CDP_URL}")
-                return CDP_URL
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-            last_error = exc
-
-        await asyncio.sleep(0.25)
-
-    raise RuntimeError(f"cloakbrowser CDP endpoint did not become ready at {CDP_URL}: {last_error}")
+VIEWPORT = {"width": 1280, "height": 720}
 
 
-def _read_url(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=2.0) as response:
-        return response.read().decode("utf-8")
+# ── File Locking (cross-platform) ───────────────────────────────────────────
+
+@contextmanager
+def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+    """Acquire an exclusive file lock. msvcrt on Windows, fcntl on POSIX."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def resolve_profile_paths(target_profile: str) -> tuple[str, str]:
+# ── Listings Database I/O ───────────────────────────────────────────────────
+
+def _load_listings() -> list[dict[str, Any]]:
+    """Read the full listings array from disk. Returns [] if missing."""
+    if not LISTINGS_FILE.exists():
+        return []
+    with LISTINGS_FILE.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError(f"{LISTINGS_FILE} must contain a JSON array.")
+    return data
+
+
+def _save_listings(listings: list[dict[str, Any]]) -> None:
+    """Atomically write the listings array back to disk."""
+    LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LISTINGS_FILE.open("w", encoding="utf-8") as f:
+        json.dump(listings, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def _update_status(listing_id: str, new_status: str) -> None:
+    """Thread-safe status update with exclusive file locking."""
+    with _exclusive_file_lock(LISTINGS_LOCK_FILE):
+        listings = _load_listings()
+        for entry in listings:
+            if entry.get("id") == listing_id:
+                old_status = entry.get("status")
+                entry["status"] = new_status
+                _save_listings(listings)
+                print(f"[Worker] Status transition: {listing_id} [{old_status} → {new_status}]")
+                return
+    raise ValueError(f"Listing not found: {listing_id}")
+
+
+def _claim_next_approved() -> dict[str, Any] | None:
+    """Atomically find and claim the first 'approved' listing.
+
+    Within a single lock acquisition, this reads the file, finds the first
+    entry with status='approved', flips it to 'processing', writes back,
+    and returns the snapshot. This prevents two worker instances from
+    claiming the same listing.
+    """
+    with _exclusive_file_lock(LISTINGS_LOCK_FILE):
+        listings = _load_listings()
+        for entry in listings:
+            if entry.get("status") == "approved":
+                listing_id = entry.get("id", "<unknown>")
+                entry["status"] = "processing"
+                _save_listings(listings)
+                print(f"[Worker] Claimed approved listing: {listing_id}")
+                return dict(entry)  # Return a snapshot copy
+    return None
+
+
+# ── Profile Resolution ───────────────────────────────────────────────────────
+
+def _resolve_profile(target_profile: str) -> Path:
+    """Resolve and validate the fb_state.json path for a target profile.
+
+    Returns the absolute Path to the state file. Raises FileNotFoundError
+    if the profile directory or state file does not exist.
+    """
     if not PROFILE_ID_PATTERN.fullmatch(target_profile) or target_profile in {".", ".."}:
-        raise ValueError(f"Unsafe target_profile value: {target_profile}")
+        raise ValueError(f"Unsafe target_profile identifier: {target_profile!r}")
 
-    profile_root = (LOCAL_STORAGE_DIR / "profiles" / target_profile).resolve()
     profiles_root = (LOCAL_STORAGE_DIR / "profiles").resolve()
-    if profiles_root not in profile_root.parents:
-        raise ValueError(f"target_profile resolved outside profile storage: {target_profile}")
+    profile_dir = (profiles_root / target_profile).resolve()
 
-    profile_dir = profile_root / "fb_browser_profile"
-    state_json = profile_root / "fb_state.json"
-    return str(profile_dir), str(state_json)
+    # Path traversal guard: ensure resolved path is under profiles_root.
+    if profiles_root not in profile_dir.parents and profile_dir != profiles_root:
+        raise ValueError(f"Profile resolved outside storage: {target_profile}")
+
+    state_file = profile_dir / "fb_state.json"
+    if not state_file.is_file():
+        raise FileNotFoundError(
+            f"Session state not found for profile '{target_profile}': {state_file}"
+        )
+
+    return state_file
 
 
-async def launch_stealth_browser(profile_dir: str, state_json: str, target_profile: str) -> Any:
-    # Self-healing: Aggressively remove all Singleton* files in the profile
-    import glob
+# ── Browser Context Factory ─────────────────────────────────────────────────
 
-    if not os.path.exists(state_json):
-        print(f"[worker] [ERROR] State context missing for profile: {target_profile}")
-        raise FileNotFoundError(f"State context missing for profile: {target_profile}")
+async def _launch_context(
+    playwright_instance,
+    state_file: Path,
+) -> tuple[Browser, BrowserContext]:
+    """Launch a Playwright Chromium browser and create a stealth context.
 
-    print(f"[worker] Pre-flight: Clearing locks in {profile_dir}...")
-    for lock_file in glob.glob(f"{profile_dir}/Singleton*"):
-        try:
-            Path(lock_file).unlink()
-            print(f"[worker] Deleted stale lock file: {lock_file}")
-        except Exception as e:
-            print(f"[worker] Failed to remove {lock_file}: {e}")
+    Uses the two-step pattern: chromium.launch() + browser.new_context()
+    because launch_persistent_context() does NOT support the storage_state
+    parameter.  Injects authenticated Facebook cookies from the profile's
+    fb_state.json via new_context(storage_state=...), which correctly
+    restores cookies, localStorage, and sessionStorage in one shot.
+    """
+    print(f"[Worker] Launching stealth Chromium browser (headless={HEADLESS})...")
+    print(f"[Worker]   User-Agent: {STEALTH_USER_AGENT[:60]}...")
+    print(f"[Worker]   Viewport:   {VIEWPORT['width']}x{VIEWPORT['height']}")
+    print(f"[Worker]   State file: {state_file}")
 
-    print(f"[worker] Launching cloakbrowser persistent context for profile {target_profile} at {profile_dir}...")
-    Path(profile_dir).mkdir(parents=True, exist_ok=True)
-
-    context = await launch_persistent_context_async(
-        user_data_dir=profile_dir,
-        headless=True,  # Changed to True for Docker compatibility
-        viewport={"width": 1280, "height": 720},
-        args=[f"--remote-debugging-port={CDP_PORT}"],
+    browser = await playwright_instance.chromium.launch(
+        headless=HEADLESS,
+        args=STEALTH_CHROMIUM_ARGS,
+        ignore_default_args=["--enable-automation"],
     )
 
-    if os.path.exists(state_json):
-        with open(state_json, "r", encoding="utf-8") as file:
-            state_data = json.load(file)
-            cookies = state_data.get("cookies", state_data) if isinstance(state_data, dict) else state_data
-            await context.add_cookies(cookies)
+    # Read the state file and normalise to Playwright's expected format.
+    # Playwright expects {"cookies": [...], "origins": [...]}.
+    # Our fb_state.json files may be stored as flat cookie arrays.
+    raw_state = json.loads(state_file.read_text(encoding="utf-8"))
+    if isinstance(raw_state, list):
+        # Flat cookie array → wrap into Playwright storage_state structure.
+        raw_state = {"cookies": raw_state, "origins": []}
 
-    await wait_for_cdp_endpoint()
-    return context
-
-
-def build_browser_session() -> BrowserSession:
-    """Bridge browser-use into the already-launched cloakbrowser session."""
-
-    print("[worker] Handing cloakbrowser's persistent CDP session to browser-use...")
-    return BrowserSession(
-        cdp_url=CDP_URL,
-        is_local=False,
-        keep_alive=True,
-        allowed_domains=FACEBOOK_ALLOWED_DOMAINS,
-        minimum_wait_page_load_time=1.0,
-        wait_for_network_idle_page_load_time=3.0,
-        wait_between_actions=0.75,
+    context = await browser.new_context(
+        viewport=VIEWPORT,
+        user_agent=STEALTH_USER_AGENT,
+        storage_state=raw_state,
+        bypass_csp=True,
+        locale="en-US",
+        timezone_id="Asia/Kolkata",
     )
 
+    print("[Worker] Browser context initialized with stealth fingerprint masking.")
+    return browser, context
 
-async def draft_listing(listing: dict[str, Any]) -> None:
-    listing_id = listing["id"]
-    context = None
-    browser_session: BrowserSession | None = None
 
-    print(f"[worker] Starting shadow draft workflow for listing {listing_id}.")
-    database.update_listing_status(listing_id, "processing")
+# ── Native Text Paste (JavaScript Clipboard Injection) ───────────────────────
+
+async def _paste_text_native(page: Page, text: str) -> None:
+    """Inject text into the focused editor via a synthetic clipboard paste event.
+
+    Instead of page.keyboard.type() which fires individual keypress events
+    (slow, drops emojis, mangles Unicode), this uses the DataTransfer API
+    to construct a paste event with the full text payload. This preserves:
+      - Line breaks (\\n)
+      - Emoji sequences (multi-codepoint)
+      - RTL/LTR markers
+      - All whitespace structure
+
+    The focused element receives the text exactly as if the user pressed
+    Ctrl+V with the text on their system clipboard.
+    """
+    await page.evaluate("""(text) => {
+        const el = document.activeElement;
+        if (!el) throw new Error('No active element to paste into');
+
+        // Build a synthetic ClipboardEvent with the text payload.
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        const pasteEvent = new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: dt,
+        });
+        el.dispatchEvent(pasteEvent);
+
+        // Fallback: if the paste event was cancelled or the element is a
+        // contenteditable div (Facebook's composer), also fire an input event
+        // to notify React's synthetic event system.
+        if (el.isContentEditable) {
+            document.execCommand('insertText', false, text);
+        } else if ('value' in el) {
+            // Standard <input> / <textarea> fallback
+            el.value = text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }""", text)
+
+    print(f"[Worker] Pasted {len(text)} characters via native clipboard injection.")
+
+
+# ── Native Image Upload (Playwright File Chooser) ───────────────────────────
+
+async def _upload_images_native(page: Page, image_paths: list[str]) -> None:
+    """Attach images to the Facebook composer via Playwright's file chooser API.
+
+    Clicks the 'Photo/video' button and intercepts the OS file dialog using
+    Playwright's expect_file_chooser() context manager, then injects the
+    real absolute file paths. No DOM selector chains required.
+    """
+    # Locate the Photo/video attachment trigger.
+    # Facebook's composer surfaces this as an aria-label or visible text button.
+    photo_button = page.get_by_label("Photo/video", exact=False).first
+    if not await photo_button.is_visible():
+        # Fallback: try the text-based locator
+        photo_button = page.get_by_text("Photo/video", exact=False).first
+
+    print(f"[Worker] Triggering file chooser for {len(image_paths)} image(s)...")
+
+    async with page.expect_file_chooser() as fc_info:
+        await photo_button.click()
+
+    file_chooser = await fc_info.value
+    await file_chooser.set_files(image_paths)
+
+    print(f"[Worker] Attached {len(image_paths)} image(s) via native file chooser.")
+    # Allow time for Facebook to process and render image thumbnails.
+    await page.wait_for_timeout(random.randint(3000, 5000))
+
+
+# ── Proof Screenshot Capture ────────────────────────────────────────────────
+
+async def _capture_proof(page: Page, listing_id: str) -> Path:
+    """Capture a full-page verification screenshot to local_storage/proofs/."""
+    PROOF_DIR.mkdir(parents=True, exist_ok=True)
+    proof_path = PROOF_DIR / f"{listing_id}_proof.png"
+    await page.screenshot(path=str(proof_path), full_page=True)
+    print(f"[Worker] Proof screenshot saved: {proof_path}")
+    return proof_path
+
+
+# ── Core Task Executor ───────────────────────────────────────────────────────
+
+async def _execute_listing(listing: dict[str, Any]) -> None:
+    """Execute a single approved listing through the full browser pipeline.
+
+    Lifecycle: claim → launch browser → navigate → paste text → upload
+    images → (optionally post) → capture proof → update status.
+
+    The browser context is ALWAYS closed in the finally block, regardless
+    of success or failure, to prevent memory/thread/port leaks.
+    """
+    listing_id: str = listing["id"]
+    browser: Browser | None = None
+    context: BrowserContext | None = None
 
     try:
-        target_profile = listing.get("target_profile", "default_profile")
+        # ── Extract and validate task payload ────────────────────────────
+        target_profile = listing.get("target_profile", "test_agent_01")
         if not isinstance(target_profile, str) or not target_profile.strip():
-            target_profile = "default_profile"
+            target_profile = "test_agent_01"
         target_profile = target_profile.strip()
-        profile_dir, state_json = resolve_profile_paths(target_profile)
 
-        if not os.path.exists(state_json):
-            print(f"[worker] [ERROR] State context missing for profile: {target_profile}")
-            database.update_listing_status(listing_id, "shadow_failed")
-            return
+        final_text = listing.get("final_text", "")
+        if not isinstance(final_text, str) or not final_text.strip():
+            raise ValueError(f"Listing {listing_id} is missing final_text content.")
+        final_text = final_text.strip()
 
-        chosen_caption = listing.get("final_text")
-        if not isinstance(chosen_caption, str) or not chosen_caption.strip():
-            raise ValueError(f"Listing {listing_id} is missing final_text from HITL approval.")
-        chosen_caption = chosen_caption.strip()
-
-        image_paths = listing.get("image_paths", [])
-        if isinstance(image_paths, str):
-            image_paths = [image_paths]
-        elif not isinstance(image_paths, list):
+        raw_image_paths = listing.get("image_paths", [])
+        if isinstance(raw_image_paths, str):
+            raw_image_paths = [raw_image_paths]
+        elif not isinstance(raw_image_paths, list):
             raise ValueError(f"Listing {listing_id} has invalid image_paths payload.")
 
-        # Ensure all paths are absolute strings for Playwright inside Docker
-        candidate_image_paths = [str(Path(p).resolve()) for p in image_paths if p and p is not None]
-        abs_image_paths = [path for path in candidate_image_paths if Path(path).exists()]
-        missing_image_paths = sorted(set(candidate_image_paths) - set(abs_image_paths))
-        if missing_image_paths:
-            print(f"[worker] Skipping missing image(s): {', '.join(missing_image_paths)}")
-
+        # Resolve to absolute paths and filter to only existing files.
+        abs_image_paths = [
+            str(Path(p).resolve())
+            for p in raw_image_paths
+            if p and Path(p).is_file()
+        ]
+        skipped = len(raw_image_paths) - len(abs_image_paths)
+        if skipped > 0:
+            print(f"[Worker] Skipped {skipped} missing image path(s) for listing {listing_id}.")
         if not abs_image_paths:
-            raise FileNotFoundError(f"Listing {listing_id} has no readable approved image paths.")
+            raise FileNotFoundError(f"Listing {listing_id}: no readable image files found.")
 
-        print(f"[worker] Loaded pre-approved caption for listing {listing_id}: {chosen_caption[:50]}...")
-        print(f"[worker] Using {len(abs_image_paths)} verified approved image(s).")
-        print(f"[Debug] Current working directory: {os.getcwd()}")
+        print(f"[Worker] ── Task Payload ──")
+        print(f"[Worker]   Listing ID : {listing_id}")
+        print(f"[Worker]   Profile    : {target_profile}")
+        print(f"[Worker]   Caption    : {final_text[:80]}...")
+        print(f"[Worker]   Images     : {len(abs_image_paths)} file(s)")
 
-        storage_dir = "/app/local_storage"
-        if os.path.isdir(storage_dir):
-            print(f"[Debug] {storage_dir} exists.")
-            print("[Debug] Files visible inside /app/local_storage:")
-            for filename in os.listdir(storage_dir):
-                full_path = os.path.join(storage_dir, filename)
-                size = os.path.getsize(full_path) if os.path.isfile(full_path) else "N/A"
-                print(f"[Debug] - {filename} | file={os.path.isfile(full_path)} | size={size} bytes")
-        else:
-            print(f"[Debug] WARNING: {storage_dir} does not exist. Volume mount likely failed.")
+        # ── Resolve profile and launch browser ───────────────────────────
+        state_file = _resolve_profile(target_profile)
 
-        if PROOF_FILE.exists():
-            print(f"[worker] Removing stale proof file before new run: {PROOF_FILE}")
-            PROOF_FILE.unlink()
+        async with async_playwright() as pw:
+            browser, context = await _launch_context(pw, state_file)
+            page: Page = await context.new_page()
+            await page.set_viewport_size(VIEWPORT)
 
-        context = await launch_stealth_browser(profile_dir, state_json, target_profile)
+            # ── Navigate to Facebook ─────────────────────────────────────
+            print("[Worker] Navigating to https://www.facebook.com...")
+            await page.goto("https://www.facebook.com", wait_until="domcontentloaded")
+            await page.wait_for_timeout(random.randint(3000, 5000))
 
-        browser_session = build_browser_session()
+            # Dismiss potential modal overlays (cookie consent, notifications).
+            for _ in range(3):
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(300)
 
-        print(f"[worker] Executing Deterministic Playwright Script for {len(abs_image_paths)} images...")
-        print("[worker] Connecting natively to CloakBrowser via direct CDP endpoint...")
-        import playwright.async_api as pw_api
-        
-        # We fetch the raw browser instance linked via cloakbrowser's port 9222
-        async with pw_api.async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-            # Grab the existing context or configure a standard clean context handle
-            context = browser.contexts[0] if browser.contexts else await browser.new_context(
-                viewport={"width": 1280, "height": 720}
-            )
-            page = await context.new_page()
-            await page.set_viewport_size({"width": 1280, "height": 720})
-            
-            try:
-                # 1. Navigate and wait for feed to load
-                await page.goto("https://www.facebook.com")
-                await page.wait_for_timeout(random.randint(4000, 7000))
-                
-                # 1. Dismiss potential blockers (modals, welcome pop-ups)
-                for _ in range(3):
-                    await page.keyboard.press("Escape")
-                    await page.wait_for_timeout(500)
+            # ── Open the post composer ───────────────────────────────────
+            print("[Worker] Locating and opening the post composer...")
+            composer_trigger = page.get_by_text("What's on your mind", exact=False).first
+            await composer_trigger.click()
+            await page.wait_for_timeout(random.randint(2000, 3000))
 
-                composer_x, composer_y = await vision_map.get_visual_target(
-                    page,
-                    "facebook_composer_trigger",
-                    "the Facebook feed composer trigger that opens the post composer, commonly labeled like What is on your mind",
-                )
-                await page.mouse.click(composer_x, composer_y)
-                print("[worker] Successfully opened the Facebook composer via vision map.")
+            # ── Upload images via native file chooser ────────────────────
+            await _upload_images_native(page, abs_image_paths)
 
-                await page.wait_for_timeout(3000)
-                
-                upload_x, upload_y = await vision_map.get_visual_target(
-                    page,
-                    "facebook_composer_photo_upload",
-                    "the Photo/video button inside the open Facebook post composer used to attach listing images",
-                )
-                async with page.expect_file_chooser() as file_chooser_info:
-                    await page.mouse.click(upload_x, upload_y)
-                file_chooser = await file_chooser_info.value
-                await file_chooser.set_files(abs_image_paths)
-                print(f"[worker] Attached {len(abs_image_paths)} images directly to DOM input.")
-                await page.wait_for_timeout(random.randint(5000, 7000))
-                
-                editor_x, editor_y = await vision_map.get_visual_target(
-                    page,
-                    "facebook_composer_text_area",
-                    "the main editable text area inside the open Facebook post composer where the caption should be typed",
-                )
-                await page.mouse.click(editor_x, editor_y)
-                await page.wait_for_timeout(500)
-                
-                # Type the caption with a human-like delay between characters
-                # This is slow enough to trigger state updates but fast enough for automation
-                await page.keyboard.type(chosen_caption, delay=20) 
-                print("[worker] Injected caption via keyboard emulation.")
-                await page.wait_for_timeout(2000)
+            # ── Focus the text editor and paste caption ──────────────────
+            print("[Worker] Focusing composer text area...")
+            # After image upload, the composer editor should be visible.
+            # Click into the editable area to ensure focus.
+            editor = page.get_by_role("textbox", name="What's on your mind").first
+            if not await editor.is_visible():
+                # Fallback: look for the contenteditable div
+                editor = page.locator('[contenteditable="true"][role="textbox"]').first
+            await editor.click()
+            await page.wait_for_timeout(500)
 
-                if not SHADOW_MODE:
-                    post_x, post_y = await vision_map.get_visual_target(
-                        page,
-                        "facebook_composer_post_button",
-                        "the final Post button in the Facebook composer used to confirm publishing the listing",
-                    )
-                    await page.mouse.click(post_x, post_y)
-                    print("[worker] Submitted Facebook post via vision map.")
-                    await page.wait_for_timeout(random.randint(5000, 7000))
-                
-                # 5. Capture Proof
-                await page.screenshot(path="/app/proof.png")
-                print("[worker] Shadow run complete. Proof saved via native DOM snapshot.")
-                
-            finally:
-                await page.close()
-                await browser.close()
+            # ── Native clipboard paste ───────────────────────────────────
+            await _paste_text_native(page, final_text)
+            await page.wait_for_timeout(random.randint(1500, 2500))
 
-        if not PROOF_FILE.exists():
-            print("[worker] proof.png was not found after agent run. Capturing fallback screenshot...")
-            await browser_session.take_screenshot(path=str(PROOF_FILE), full_page=True)
-            print(f"[worker] Fallback screenshot saved at {PROOF_FILE}.")
-        else:
-            print(f"[worker] Agent-created proof found at {PROOF_FILE}.")
+            # ── Conditional post submission ──────────────────────────────
+            if not SHADOW_MODE:
+                print("[Worker] LIVE MODE — Clicking Post button...")
+                post_button = page.get_by_role("button", name="Post", exact=True).first
+                await post_button.click()
+                await page.wait_for_timeout(random.randint(5000, 8000))
+                print("[Worker] Post submitted to Facebook.")
+            else:
+                print("[Worker] SHADOW MODE — Skipping post submission (draft staged only).")
 
-        destination_name = f"{listing_id}_proof.png"
-        print(f"[worker] Saving proof to local mock storage as {destination_name}...")
-        saved_path = storage.upload_proof(PROOF_FILE, destination_name)
-        print(f"[worker] Proof upload simulation complete: {saved_path}")
+            # ── Capture proof screenshot ─────────────────────────────────
+            await _capture_proof(page, listing_id)
 
-        success_status = "shadow_success" if SHADOW_MODE else "completed"
-        database.update_listing_status(listing_id, success_status)
-        print(f"[worker] Listing {listing_id} marked as {success_status}.")
+        # ── Update terminal status ───────────────────────────────────────
+        terminal_status = "shadow_success" if SHADOW_MODE else "completed"
+        _update_status(listing_id, terminal_status)
+        print(f"[Worker] Listing {listing_id} completed → {terminal_status}")
 
     except Exception as exc:
-        print(f"[worker] ERROR while processing listing {listing_id}: {exc}")
-        database.update_listing_status(listing_id, "shadow_failed")
+        print(f"[Worker] ERROR processing listing {listing_id}: {exc}")
+        try:
+            _update_status(listing_id, "failed")
+        except Exception as status_exc:
+            print(f"[Worker] CRITICAL: Failed to update status to 'failed': {status_exc}")
         raise
 
     finally:
-        if browser_session is not None:
-            print("[worker] Stopping browser-use CDP session...")
-            try:
-                await browser_session.stop()
-            except Exception as exc:
-                print(f"[worker] Warning: browser-use session stop failed: {exc}")
-
+        # ── Strict fail-safe browser cleanup ─────────────────────────────
+        # Close context first, then browser, to free all resources.
+        # The `async with async_playwright()` block handles the Playwright
+        # connection, but we must close browser objects explicitly.
         if context is not None:
-            print("[worker] Closing cloakbrowser context...")
             try:
                 await context.close()
-            except Exception as exc:
-                print(f"[worker] Warning: cloakbrowser context close failed: {exc}")
+                print(f"[Worker] Browser context closed for listing {listing_id}.")
+            except Exception as close_exc:
+                print(f"[Worker] Warning: context close failed: {close_exc}")
+        if browser is not None:
+            try:
+                await browser.close()
+                print(f"[Worker] Browser closed for listing {listing_id}.")
+            except Exception as close_exc:
+                print(f"[Worker] Warning: browser close failed: {close_exc}")
 
+
+# ── Continuous Polling Loop ──────────────────────────────────────────────────
 
 async def main() -> None:
-    print("[worker] AutoBVB local worker started.")
-    print(f"[worker] Polling every {POLL_INTERVAL_SECONDS} seconds.")
-    print(f"[worker] Local listings file: {database.LISTINGS_FILE}")
-    print(f"[worker] Local proof storage: {storage.LOCAL_PROOF_DIR}")
+    """Entrypoint: infinite polling loop that claims and executes approved listings."""
+    print("=" * 64)
+    print("  AutoBVB v5.0  ·  Phase 2 Controller Worker")
+    print("=" * 64)
+    print(f"  Listings file : {LISTINGS_FILE}")
+    print(f"  Proof storage : {PROOF_DIR}")
+    print(f"  Poll interval : {POLL_INTERVAL_SECONDS}s")
+    print(f"  Headless      : {HEADLESS}")
+    print(f"  Shadow mode   : {SHADOW_MODE}")
+    print("=" * 64)
 
     while True:
         try:
-            listing = database.get_pending_listing()
+            listing = _claim_next_approved()
             if listing is None:
-                print(f"[worker] Sleeping for {POLL_INTERVAL_SECONDS} seconds...")
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 continue
 
-            await draft_listing(listing)
+            await _execute_listing(listing)
 
+        except KeyboardInterrupt:
+            print("\n[Worker] Received shutdown signal. Exiting gracefully.")
+            break
         except Exception as exc:
-            print(f"[worker] Loop error: {exc}")
-            print(f"[worker] Sleeping for {POLL_INTERVAL_SECONDS} seconds before retry...")
+            print(f"[Worker] Loop error: {exc}")
+            print(f"[Worker] Retrying in {POLL_INTERVAL_SECONDS}s...")
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 

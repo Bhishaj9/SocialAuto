@@ -222,7 +222,7 @@ def approve_draft(request: ApproveDraftRequest) -> dict[str, str]:
 
     listing: dict[str, Any] = {
         "id": request.draft_id,
-        "status": "pending",
+        "status": "approved",
         "final_text": request.final_approved_text,
         "image_paths": request.image_paths,
         "target_profile": _validate_profile_id(request.target_profile),

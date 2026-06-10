@@ -65,20 +65,20 @@ def _save_listings(listings: list[dict[str, Any]]) -> None:
         file.write("\n")
 
 
-def get_pending_listing() -> dict[str, Any] | None:
-    """Return the first listing whose status is pending."""
-    print("[database] Checking listings.json for pending listings...")
+def get_approved_listing() -> dict[str, Any] | None:
+    """Return the first listing whose status is approved."""
+    print("[database] Checking listings.json for approved listings...")
     with _LISTINGS_LOCK:
         with _exclusive_file_lock(LISTINGS_LOCK_FILE):
             listings = _load_listings()
 
             for listing in listings:
-                if listing.get("status") == "pending":
+                if listing.get("status") == "approved":
                     listing_id = listing.get("id", "<missing id>")
-                    print(f"[database] Found pending listing: {listing_id}")
+                    print(f"[database] Found approved listing: {listing_id}")
                     return dict(listing)
 
-    print("[database] No pending listing found.")
+    print("[database] No approved listing found.")
     return None
 
 
@@ -108,8 +108,8 @@ def update_listing_status(listing_id: str, new_status: str) -> None:
 class FirestoreManager:
     """Compatibility wrapper exposing the same calls as the live Firestore manager."""
 
-    def get_pending_listing(self) -> dict[str, Any] | None:
-        return get_pending_listing()
+    def get_approved_listing(self) -> dict[str, Any] | None:
+        return get_approved_listing()
 
     def update_listing_status(self, document_id: str, new_status: str) -> None:
         update_listing_status(document_id, new_status)
