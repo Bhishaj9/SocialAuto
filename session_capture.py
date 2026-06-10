@@ -1,34 +1,60 @@
 """
 session_capture.py
 
-Captures a fully authenticated Facebook session using standard Playwright with
-the system's native Google Chrome, falling back to Microsoft Edge if needed.
-Injects comprehensive anti-detection masking and init scripts to defeat automated detection.
-
-Workflow:
-  1. Wipe any corrupted profile directory for a 100% clean slate.
-  2. Launch a visible, persistent native browser profile with high-stealth arguments.
-  3. Hook JS injection layer on page creation.
-  4. Navigate directly to Facebook.
-  5. Wait for up to 180 seconds or until the window is closed.
-  6. Save cookies + localStorage to fb_state.json.
+Stealth Facebook Session Capture with Hardware-Spoofing Overrides
+Captures a fully authenticated Facebook session using async Playwright with
+anti-detection browser fingerprint spoofing to bypass Meta's automation detection.
 """
 
+import asyncio
 import json
 import shutil
-import signal
 import sys
-import time
 from pathlib import Path
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-PROFILE_DIR = "./fb_browser_profile"
+PROFILE_DIR = "./fb_browser_profile/test_agent_01"
 STATE_FILE = "local_storage/profiles/test_agent_01/fb_state.json"
+
+ANTI_DETECTION_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-infobars",
+    "--no-sandbox",
+    "--disable-setuid-sandbox"
+]
+
+VIEWPORT = {"width": 1280, "height": 720}
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+LOCALE = "en-US"
+TIMEZONE_ID = "Asia/Kolkata"
+
+INIT_SCRIPT = """
+    // 1. Remove the webdriver property
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    
+    // 2. Mock Chrome runtime properties
+    window.chrome = {
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
+    };
+    
+    // 3. Spoof Plugins array (so it is not empty)
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+            { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+            { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer' }
+        ]
+    });
+    
+    // 4. Force regular consumer hardware arrays
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+"""
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,7 +65,7 @@ def clean_profile(profile_dir: str) -> None:
     """Nuke the profile directory so every run starts from a 100% clean slate."""
     path = Path(profile_dir)
     if path.exists():
-        print(f"[*] Removing corrupted profile: {path.resolve()}")
+        print(f"[*] Removing stale profile: {path.resolve()}")
         shutil.rmtree(path)
         print("[*] Profile directory wiped clean.")
 
@@ -58,141 +84,61 @@ def print_state_summary(path: str) -> None:
         print("    (Could not parse state file; profile data is still saved on disk)")
 
 
-def launch_native_persistent_context(playwright):
-    """Launch native Chrome first, then native Edge if Chrome is unavailable."""
-    last_error = None
-
-    # High-stealth Chromium launch flags
-    stealth_args = [
-        "--disable-blink-features=AutomationControlled",
-        "--use-fake-ui-for-media-stream",
-        "--disable-infobars",
-        "--no-sandbox",
-    ]
-
-    # Real-world User-Agent string
-    user_agent = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    )
-
-    # Viewport mapping
-    viewport = {"width": 1280, "height": 720}
-
-    for channel in ("chrome", "msedge"):
-        try:
-            print(f"[*] Launching persistent browser with channel='{channel}' ...")
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(Path(PROFILE_DIR).resolve()),
-                channel=channel,
-                headless=False,  # Hardcoded visible browser
-                args=stealth_args,
-                ignore_default_args=["--enable-automation"],
-                user_agent=user_agent,
-                viewport=viewport,
-            )
-            print(f"[+] Browser launched using channel='{channel}'.")
-            return context
-        except PlaywrightError as e:
-            last_error = e
-            print(f"[!] Could not launch channel='{channel}': {e}")
-
-    raise RuntimeError(
-        "Could not launch native Chrome or Edge via Playwright. "
-        "Install Google Chrome or Microsoft Edge and try again."
-    ) from last_error
-
-
-# ---------------------------------------------------------------------------
-# Globals
-# ---------------------------------------------------------------------------
-_shutting_down = False
-
-
-def _signal_handler(signum, frame):
-    global _shutting_down
-    _shutting_down = True
-
-
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    global _shutting_down
-
+async def main() -> None:
     # Step 0: Wipe any stale/corrupted profile from interrupted logins.
     clean_profile(PROFILE_DIR)
 
     print("=" * 60)
-    print(" Facebook Native Browser Session Capture")
+    print(" Facebook Stealth Session Capture (Hardware-Spoofed)")
     print("=" * 60)
     print(f"[*] Profile directory : {Path(PROFILE_DIR).resolve()}")
     print(f"[*] State output      : {Path(STATE_FILE).resolve()}")
     print()
 
     try:
-        with sync_playwright() as playwright:
-            context = launch_native_persistent_context(playwright)
+        async with async_playwright() as playwright:
+            print("[*] Launching stealth persistent browser context...")
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(Path(PROFILE_DIR).resolve()),
+                headless=False,
+                args=ANTI_DETECTION_ARGS,
+                viewport=VIEWPORT,
+                user_agent=USER_AGENT,
+                locale=LOCALE,
+                timezone_id=TIMEZONE_ID,
+            )
+            print("[+] Browser context launched with anti-detection overrides.")
 
-            # Open a blank page; navigate to Facebook manually in the browser.
-            try:
-                page = context.new_page()
-                
-                # Javascript Injection Layer right after the context page is opened
-                page.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    window.chrome = { runtime: {} };
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-                """)
-                
-                print("[*] Navigating directly to https://www.facebook.com...")
-                page.goto("https://www.facebook.com")
-            except Exception as e:
-                print(f"[!] Could not open page or navigate: {e}")
+            page = await context.new_page()
+            print("[+] New page created, injecting stealth init script...")
+            await page.add_init_script(INIT_SCRIPT)
+            print("[+] Stealth init script injected (webdriver, chrome, plugins, languages).")
+
+            print("[*] Navigating to https://www.facebook.com ...")
+            await page.goto("https://www.facebook.com", wait_until="domcontentloaded")
+            print("[+] Facebook loaded. Browser is ready for manual authentication.")
 
             print()
             print("[!] Browser is now open and visible.")
-            print("[!] Log in to Facebook, clear any 2FA, dismiss 'Save Device' pop-ups.")
-            print("[!] You have 180 seconds to complete the login/checkpoint...")
+            print("[!] Log in to Facebook, complete 2FA, dismiss 'Save Device' pop-ups.")
             print("[!] Close the browser window when finished, or press Ctrl+C here.")
             print()
-            print("[*] Waiting for you to finish...")
+            print("[*] Waiting for you to finish (process will stay alive)...")
 
-            # Wait until the user closes the browser or interrupts the script or times out.
-            start_time = time.time()
-            disconnected = False
-            last_print_time = 0
-            while not _shutting_down and not disconnected:
-                elapsed = time.time() - start_time
-                if elapsed > 180:
-                    print(f"\n[*] 180-second timeout reached. Saving state...")
-                    break
-                try:
-                    # Check if pages exist to see if browser is closed
-                    if not context.pages:
-                        disconnected = True
-                        break
-                except Exception:
-                    disconnected = True
-                    break
-                
-                # Print progress update
-                if int(elapsed) // 10 > last_print_time:
-                    last_print_time = int(elapsed) // 10
-                    print(f"    [Time elapsed: {int(elapsed)}s / 180s]")
-                    
-                time.sleep(1)
-
-            print("\n[*] Saving session state ...")
+            # Keep the process alive indefinitely until user closes browser or Ctrl+C
             try:
-                context.storage_state(path=STATE_FILE)
+                await asyncio.Event().wait()
+            except KeyboardInterrupt:
+                print("\n[*] Keyboard interrupt received.")
+
+            print("\n[*] Browser closed by user. Saving session state ...")
+            try:
+                await context.storage_state(path=STATE_FILE)
                 print(f"[+] Session state saved to {Path(STATE_FILE).resolve()}")
                 print_state_summary(STATE_FILE)
             except Exception as e:
@@ -201,15 +147,11 @@ def main() -> None:
                 print(f"    {Path(PROFILE_DIR).resolve()}")
 
             print("[*] Closing browser context ...")
-            try:
-                context.close()
-            except Exception:
-                pass
+            await context.close()
 
     except Exception as e:
         print(f"[!] Failed to capture session: {e}", file=sys.stderr)
         import traceback
-
         traceback.print_exc()
         sys.exit(1)
 
@@ -217,4 +159,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
