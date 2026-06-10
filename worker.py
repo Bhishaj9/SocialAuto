@@ -427,7 +427,9 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
             print("[Worker] Locating and opening the post composer...")
             composer_trigger = page.get_by_text("What's on your mind", exact=False).first
             await composer_trigger.click()
-            await page.wait_for_timeout(random.randint(2000, 3000))
+            print("[Worker] Waiting for Create Post modal dialog...")
+            await page.wait_for_selector("div[role='dialog']")
+            await page.wait_for_timeout(random.randint(1000, 2000))
 
             # ── Upload images via native file chooser ────────────────────
             await _upload_images_native(page, abs_image_paths)
