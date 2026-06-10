@@ -1,156 +1,129 @@
-# AutoBVB: Stealth Shadow-Mode Real Estate Post Draft Automation
+# AutoBVB v5.0 — Asymmetric Multi-Tenant Agentic Real Estate Auto-Poster
 
-AutoBVB (Automated Broker-to-Buyer/Broker-to-Broker) is a production-grade, local shadow-mode execution worker designed to automate the drafting of authenticated real estate listings on Facebook. Specifically tailored for the Noida Extension rental market, the system combines Google GenAI models, persistent antidetect browser profiles, and robust browser-use frameworks to achieve resilient, bot-detection-resistant automation.
-
-The core design philosophy is **Shadow-Mode Execution**: the worker automates the complex steps of navigating Facebook's DOM, bypassing interactive blockers, uploading multiple high-resolution images, and typing AI-optimized marketing copy, but halts **immediately before publication** to allow manual review, ensuring 100% safety and account preservation.
+**AutoBVB** is an asymmetric multi-tenant agentic real estate auto-poster engineered to achieve **human-like browser posting** with **zero platform ban risks**. It targets the Noida Extension rental market, automating authenticated Facebook Marketplace and Group listings through a stealth, shadow-mode execution pipeline that halts immediately before publication for manual review.
 
 ---
 
-## 🏗️ System Architecture & Data Flow
+## Architecture Overview: The "Two-Brain AI Engine"
 
-Below is the conceptual flow of the authentication extraction and autonomous shadow-drafting pipelines:
+AutoBVB v5.0 employs a dual-model asymmetric intelligence architecture decoupled from legacy monolithic prompts:
 
-```mermaid
-graph TD
-    %% Subsystems
-    Host[Host Machine / Interactive Session]
-    StateFile[(fb_state.json)]
-    Docker[Docker Container / Headless Worker]
-    Gemini[Google Gemini 2.5 Pro]
-    Cloak[CloakBrowser Persistent Chromium]
-    FB[Facebook Feed / Composer]
+| Brain | Role | Model | Input | Output |
+|-------|------|-------|-------|--------|
+| **Brain 1: Visual Analyst** | Factual visual parsing & attribute extraction | **Gemini 2.0 Flash** | Property images + raw metadata (flat config, amenities, metro proximity) | Structured JSON: room counts, furnishing state, visible amenities, condition flags |
+| **Brain 2: Marketing Copywriter** | Anti-spam caption generation (zero markdown) | **Gemini 2.0 Flash** | Brain 1 JSON + contact info + platform rules | 3 pure-text variations: Gold Standard, Lifestyle Narrative, Short & Urgent |
 
-    %% Pipeline 1: Interactive Authentication
-    Host -- "1. Manually logs in via Chrome/Edge" --> session_capture.py
-    session_capture.py -- "2. Serializes Cookies & LocalStorage" --> StateFile
+**Execution Loop**: Self-contained background worker powered by **native Playwright drivers** using **cookie state injection blocks** (`fb_state.json` → CDP session → persistent Chromium). No `browser-use` framework. No vision-model navigation. Deterministic DOM interaction only.
 
-    %% Pipeline 2: Headless Shadow Draft Worker
-    Docker -- "3. Polls listings.json for pending jobs" --> worker.py
-    worker.py -- "4. Reads image & flat metadata" --> Gemini
-    Gemini -- "5. Generates 3 anti-spam variations" --> worker.py
-    worker.py -- "6. Injects cookies & launches CDP session" --> Cloak
-    Cloak -- "7. Connects via Playwright connect_over_cdp" --> worker.py
-    worker.py -- "8. Human-emulated browser interactions" --> FB
-    FB -- "9. Saves screenshot proof" --> LocalStorage[(local_storage/proofs)]
+---
+
+## Chronological Master Roadmap
+
+### ✅ Phase 1: The AI Engine Refactor
+- [x] Deleted legacy `vision_map.py` monolith
+- [x] Implemented asymmetric **Two-Brain** architecture (Visual Analyst + Marketing Copywriter)
+- [x] Pure-text variation generation — zero markdown formatting bugs
+- [x] Structured JSON contract between brains for type-safe handoff
+
+### ✅ Phase 2: The Controller Tooling
+- [x] Overhauled `worker.py` with **localized session states** per tenant
+- [x] **Clipboard paste wrappers** for text structure safety (bypasses Lexical/React input corruption)
+- [x] **Native file chooser hooks** for multi-image uploads (no `set_input_files` race conditions)
+- [x] Deterministic human-emulation: character delays, scroll mimicry, modal evasion
+
+### ⬜ Phase 3: Central Database Migration
+- [ ] Transition from `listings.json` → **Supabase PostgreSQL** (centralized listings table)
+- [ ] Enterprise media buckets for property images (Supabase Storage)
+- [ ] Row-level security policies for multi-tenant isolation
+- [ ] Real-time subscriptions for worker polling (replaces 10s file watch)
+
+### ⬜ Phase 4: VPS Container Deployment
+- [ ] Hardcode production **static residential proxy routing** variables
+- [ ] Finalize `docker-compose.yml` with **virtual framebuffers** (Xvfb) for headless Chromium
+- [ ] Multi-tenant isolation scaling via container replication
+- [ ] Health checks, log aggregation, and zero-downtime rolling updates
+
+---
+
+## Local Quickstart Guide
+
+### Prerequisites
+- Python 3.11+
+- `fb_state.json` (valid Facebook session cookies — generate via `session_capture.py`)
+- `dummy_flat.jpg` or real property images in `local_storage/`
+- `.env` with `GOOGLE_API_KEY`
+
+### Runtime Commands
+
+```bash
+# 1. Launch API server (FastAPI, port 8000)
+python api.py
+
+# 2. Launch background worker (polling loop)
+python worker.py
+
+# 3. Run Phase 1 verification test harness
+python verify_phase1.py
+```
+
+### Verify Phase 1 Output
+`verify_phase1.py` exercises the full Two-Brain pipeline:
+1. Loads test image + metadata
+2. Invokes Brain 1 → validates JSON schema compliance
+3. Invokes Brain 2 → validates 3 variations, zero markdown, char limits
+4. Asserts clipboard-safe text serialization
+5. Exits 0 on success, non-zero on contract violation
+
+---
+
+## Project Structure (v5.0 Core)
+
+```
+AutoBVB/
+├── api.py                    # FastAPI server for job ingestion & status
+├── worker.py                 # Background polling loop + Playwright executor
+├── content_engine.py         # Two-Brain orchestration (Brain1 + Brain2)
+├── database.py               # Supabase client (Phase 3) / JSON fallback (Phase 1-2)
+├── session_capture.py        # Interactive Chrome login → fb_state.json
+├── verify_phase1.py          # Phase 1 contract test harness
+├── _verify_*.py              # Internal verification utilities
+├── fb_state.json             # Cookie state (gitignored in prod)
+├── local_storage/            # Property images & proof screenshots
+├── requirements.txt
+└── docker-compose.yml        # Phase 4 target
 ```
 
 ---
 
-## ⚡ Technical Core Capabilities
+## Environment Variables
 
-### 1. Antidetect & Stealth Browser Integration
-* **CloakBrowser Persistent Contexts**: Bypasses Meta's advanced headless detection frameworks by employing a customized anti-detect browser binary (`cloakbrowser`) connected via standard Chrome DevTools Protocol (CDP) on port `9222`.
-* **Playwright over CDP**: Decouples the browser runtime from the script runtime. The python worker executes commands natively through a `playwright.async_api.connect_over_cdp` hook, making the automation indistinguishable from a user operating a persistent local browser.
-
-### 2. State-of-the-Art Generative Marketing (Hermes Content Agent)
-* **Visual Context-Aware Copywriting**: Employs the `gemini-2.5-pro` model to evaluate property pictures directly against raw metadata (flat configuration, amenities, metro proximity).
-* **Meta Spam Filter Evasion**: Generates exactly three structurally diverse variations of every caption:
-  1. *The Gold Standard* (Highly structured, bulleted professional copy)
-  2. *The Lifestyle Narrative* (Conversational, emotionally resonant storytelling)
-  3. *The Short & Urgent* (High-urgency, scarcity-focused ad copy)
-* **Zero-Markdown Serialization**: Explicitly filters and converts Markdown syntaxes (e.g., `**`, `_`, `#` headers) to raw emoji bullet points and block caps since Facebook's composer does not natively parse GFM.
-
-### 3. Human Simulation Playwright Pipeline
-* **React/Lexical Input Injection**: Rather than assigning raw text directly to the DOM (which breaks Facebook’s state management libraries), the worker implements dynamic character-by-character typing emulation (`page.keyboard.type(..., delay=20)`) to trigger synthetic key-up and input events correctly.
-* **Aggressive Modals & Blocker Evasion**: Automatically handles unexpected layout shifts, cookie pop-ups, and welcome modals using keyboard escape sequences and highly generalized element location strategies.
-* **Self-Healing File Locks**: Automatically tracks and purges stale Chromium lockfiles (e.g., `SingletonLock`, `SingletonCookie`) inside virtual directory volumes before launching Chromium in containerized environments.
-
----
-
-## 📂 Codebase Subsystems
-
-### 🔑 Authentication Capture
-* **[`session_capture.py`](file:///d:/Projects/AutoBVB/session_capture.py)**: Spawns a visible, persistent native Google Chrome or MS Edge profile on the host OS. The user logs in manually to bypass 2FA and captchas, and the script serializes active cookies, origins, and `localStorage` to `fb_state.json`.
-* **[`extract_state.py`](file:///d:/Projects/AutoBVB/extract_state.py)**: Headless alternative designed to connect to the existing persistent data directory (`./fb_browser_profile`) and cleanly extract authorization state without launching a GUI.
-* **[`export_auth.py`](file:///d:/Projects/AutoBVB/export_auth.py)**: Simple helper that navigates to Facebook and saves session credentials after a 60-second delay.
-
-### ⚙️ Core Worker Pipeline
-* **[`worker.py`](file:///d:/Projects/AutoBVB/worker.py)**: The heartbeat of the system. Loops infinitely, polling the local database, extracting properties, invoking Gemini, establishing CDP handshakes, uploading images natively, and drafting the post.
-* **[`content_engine.py`](file:///d:/Projects/AutoBVB/content_engine.py)**: Interfaces with the Google GenAI SDK to translate property assets into highly targeted नोएडा Extension rental advertisements.
-* **[`shadow_test.py`](file:///d:/Projects/AutoBVB/shadow_test.py)**: Implements an autonomous agent using the open-source `browser-use` framework. Utilizes a vision-based `gemini-2.5-flash` model to dynamically navigate to Facebook, identify elements, and draft test listings.
-
-### 🗄️ Database & Mock Storage
-* **[`database.py`](file:///d:/Projects/AutoBVB/database.py)**: A zero-dependency, JSON-backed mock database (`listings.json`) that manages listing statuses (`pending`, `processing`, `shadow_success`, `shadow_failed`) to enable local testing without Cloud Firestore overhead.
-* **[`storage.py`](file:///d:/Projects/AutoBVB/storage.py)**: Mock Google Cloud Storage module that securely routes output proofs (`proof.png`) to `local_storage/proofs`.
-
----
-
-## 🚀 Setup & Execution Guide
-
-### Prerequisite Environment Variables
-Create a `.env` file in the root directory:
 ```env
+# Required
 GOOGLE_API_KEY=your_gemini_api_key
-SHADOW_MODE=True
-# Optional firebase mocks configuration
-FIREBASE_CREDENTIALS=./service-accounts/firebase-key.json
-GOOGLE_APPLICATION_CREDENTIALS=./service-accounts/firebase-key.json
-GCP_PROJECT_ID=autobvb-xxxx
-GCP_BUCKET_NAME=autobvb-xxxx.appspot.com
-```
 
-### 1. Interactive Session Capture (Run on Host Machine)
-You must generate the state file on a machine with a display server so that you can complete the Facebook login:
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-playwright install
+# Phase 3+ (Supabase)
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_ANON_KEY=xxx
+SUPABASE_SERVICE_ROLE_KEY=xxx
 
-# 2. Run interactive capture
-python session_capture.py
-```
-*A browser window will open. Navigate to Facebook, log in, authorize your session, and then close the browser window.* The file `fb_state.json` will be generated locally.
-
-### 2. Local Worker Mock Setup
-Create or update `listings.json` with a pending listing:
-```json
-[
-  {
-    "id": "listing_001",
-    "status": "pending",
-    "flat_details": "3BHK Semi-Furnished, Sector 1 Noida Extension",
-    "contact_number": "+91-9999999999",
-    "metadata": {
-      "image_paths": ["/app/local_storage/flat_image_1.jpg"]
-    }
-  }
-]
-```
-
-### 3. Execution via Docker Compose
-Build and run the headless shadow worker using Docker:
-```bash
-# Build the container
-docker compose build
-
-# Start the worker daemon
-docker compose up -d
-```
-The container will launch `worker.py` which will actively poll `listings.json` every 10 seconds. When a listing moves to `processing`, it generates real estate copywriting via Gemini, launches `cloakbrowser` headlessly inside the container, attaches images, writes the composer draft, captures `/app/proof.png`, and marks the listing as `shadow_success`.
-
----
-
-## 🛡️ Playwright Human Emulation Snippet
-The following snippet from `worker.py` illustrates the robust and deterministic method used to bypass dynamic React component tracking on Facebook:
-
-```python
-# 1. Bulk Upload Images via the hidden input element directly in the DOM
-file_input = page.locator('input[type="file"][accept*="image"]').first
-await file_input.set_input_files(abs_image_paths)
-await page.wait_for_timeout(random.randint(5000, 7000))
-
-# 2. Inject Text using actual human-like keyboard delays to trigger Lexical events
-editor_locator = page.locator('[contenteditable="true"]').first
-await editor_locator.click()
-await page.wait_for_timeout(500)
-await page.keyboard.type(chosen_caption, delay=20) # 20ms human delay
+# Phase 4 (VPS)
+PROXY_HOST=residential-proxy.example.com
+PROXY_PORT=8080
+PROXY_USER=xxx
+PROXY_PASS=xxx
 ```
 
 ---
 
-## 🧪 Testing
-To test agent-driven dynamic shadow navigation with vision models, verify your `.env` contains your `GOOGLE_API_KEY` and run:
-```bash
-python shadow_test.py
-```
-This triggers a high-fidelity vision agent that operates Facebook, writes `TEST_CAPTION` inside the composer, safely stops, and produces a complete full-page verification screenshot saved to `shadow_test_success.png`.
+## Safety & Compliance
+
+- **Shadow-mode only**: Worker **never clicks "Publish"**. Stops at composer review state.
+- **Manual gate**: Human reviews screenshot proof (`local_storage/proofs/`) before any live post.
+- **Account preservation**: Persistent cookie profiles, residential proxies, human delays — zero bot signatures.
+- **Multi-tenant isolation**: Per-tenant `fb_state.json`, database rows, and container instances (Phase 4).
+
+---
+
+## License
+
+Proprietary — Internal Use Only.
