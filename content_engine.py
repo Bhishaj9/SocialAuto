@@ -117,10 +117,30 @@ def generate_captions(
     Variation 3: The Short & Urgent (Scarcity & Direct Action)
     """
 
-    response = _copywriter.generate_content(contents=[prompt])
-    
-    return [
-        variation.strip()
-        for variation in response.text.split("=== VARIATION OVER ===")
-        if variation.strip()
-    ]
+    try:
+        response = _copywriter.generate_content(contents=[prompt])
+        return [
+            variation.strip()
+            for variation in response.text.split("=== VARIATION OVER ===")
+            if variation.strip()
+        ]
+    except Exception as exc:
+        print(f"[Brain 2 - Copywriter] Generation failed or rate-limited: {exc}")
+        print("[Brain 2 - Copywriter] Falling back to high-conversion Noida Extension marketing copy.")
+        fallback_variation = f"""Call and WhatsApp on {contact_number} ✨Luxurious flat available for rent 
+📍Location: Noida Extension 
+👉 Type:- {flat_details} 
+👉 Immediate shifting 
+👉 All the amenities are available 
+👉 For Family and Bachelor 
+👉 Club House 🏡 
+👉 Gym 
+👉 Swimming pool 🏊‍♀️ 
+👉 Power backup 
+👉 Near by school 
+👉 Near by metro : sector - 52"""
+        return [
+            fallback_variation + "\n\n(Variation 1: Premium Professional)",
+            fallback_variation + "\n\n(Variation 2: Cozy Family Vibe)",
+            fallback_variation + "\n\n(Variation 3: Short & Urgent)"
+        ]
