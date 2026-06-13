@@ -1,108 +1,166 @@
-"""Local JSON-backed database mock for AutoBVB.
+"""Local Supabase-backed database engine for AutoBVB.
 
-This module intentionally avoids Firestore so the worker can be tested end to
-end while Firebase billing is unavailable.
+This module replaces the legacy JSON-backed database with real-time operations
+pointing to a local Supabase PostgreSQL instance.
 """
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-import json
 import os
 from pathlib import Path
-import threading
-from typing import Any, Iterator
+from typing import Any
 
-LISTINGS_FILE = Path(__file__).resolve().parent / "listings.json"
-LISTINGS_LOCK_FILE = Path(__file__).resolve().parent / "listings.json.lock"
-_LISTINGS_LOCK = threading.Lock()
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
 
-@contextmanager
-def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock_file:
-        if os.name == "nt":
-            import msvcrt
+class DatabaseEngine:
+    """Database Engine using Supabase client to perform CRUD operations on 'listings'."""
 
-            lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
+    def __init__(self, url: str | None = None, key: str | None = None) -> None:
+        # Load environment variables from .env first
+        load_dotenv()
+        # Explicitly load .env.local if present to ensure local developer keys take precedence
+        project_dir = Path(__file__).resolve().parent
+        env_local_path = project_dir / ".env.local"
+        if env_local_path.is_file():
+            load_dotenv(dotenv_path=env_local_path, override=True)
 
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        self.url = url or os.getenv("SUPABASE_URL")
+        self.key = key or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+
+        if not self.url or not self.key:
+            raise ValueError(
+                "Supabase URL and Key (Service Role or Anon) must be set via environment or arguments."
+            )
+
+        self.client: Client = create_client(self.url, self.key)
+
+    def create_listing(
+        self, profile_id: str, original_assets: list[str], listing_id: str | None = None
+    ) -> dict[str, Any]:
+        """Insert a fresh listing row into the database with a status of 'pending'."""
+        payload: dict[str, Any] = {
+            "profile_id": profile_id,
+            "original_assets": original_assets,
+            "status": "pending",
+        }
+        if listing_id:
+            payload["id"] = listing_id
+
+        response = self.client.table("listings").insert(payload).execute()
+        if not response.data:
+            raise RuntimeError("Failed to insert listing into PostgreSQL database.")
+        return response.data[0]
+
+    def update_draft_captions(self, listing_id: str, generated_captions: str) -> dict[str, Any]:
+        """Update a listing row with generated captions."""
+        # Cleanly parse generated_captions to list of variations for storage if it is a string
+        variations = [v.strip() for v in generated_captions.split("=== VARIATION OVER ===") if v.strip()]
+
+        response = self.client.table("listings").update({
+            "generated_captions": {
+                "raw_text": generated_captions,
+                "variations": variations,
+            }
+        }).eq("id", listing_id).execute()
+
+        if not response.data:
+            raise RuntimeError(f"Listing {listing_id} not found to update captions.")
+        return response.data[0]
+
+    def approve_listing(self, listing_id: str, final_approved_text: str) -> dict[str, Any]:
+        """Lock the copy text and transition the row state to approved."""
+        response = self.client.table("listings").update({
+            "final_approved_text": final_approved_text,
+            "status": "approved",
+        }).eq("id", listing_id).execute()
+
+        if not response.data:
+            raise RuntimeError(f"Listing {listing_id} not found to approve.")
+        return response.data[0]
+
+    def list_listings(self) -> list[dict[str, Any]]:
+        """Fetch all listings and map them to legacy dictionary structure for UI compatibility."""
+        response = self.client.table("listings").select("*").order("created_at", desc=True).execute()
+        mapped = []
+        for row in response.data:
+            mapped.append({
+                "id": str(row["id"]),
+                "status": row["status"],
+                "final_text": row.get("final_approved_text"),
+                "image_paths": row.get("original_assets", []),
+                "target_profile": row.get("profile_id"),
+                "generated_captions": row.get("generated_captions"),
+            })
+        return mapped
+
+    def claim_job_atomically(self, worker_name: str) -> dict[str, Any] | None:
+        """Atomically find and claim the first 'approved' listing using RPC."""
+        try:
+            response = self.client.rpc(
+                "claim_next_approved_listing",
+                {"worker_id": worker_name}
+            ).execute()
+            if response.data:
+                return response.data[0]
+        except Exception as exc:
+            print(f"[database] claim_job_atomically failed: {exc}")
+        return None
+
+    def mark_completed(self, listing_id: str) -> dict[str, Any]:
+        """Transition the listing row state to completed."""
+        response = self.client.table("listings").update({
+            "status": "completed",
+        }).eq("id", listing_id).execute()
+        if not response.data:
+            raise RuntimeError(f"Listing {listing_id} not found to mark completed.")
+        return response.data[0]
+
+    def mark_failed(self, listing_id: str, error_message: str) -> dict[str, Any]:
+        """Transition the listing row state to failed and set the error message."""
+        response = self.client.table("listings").update({
+            "status": "failed",
+            "error_message": error_message,
+        }).eq("id", listing_id).execute()
+        if not response.data:
+            raise RuntimeError(f"Listing {listing_id} not found to mark failed.")
+        return response.data[0]
 
 
-def _load_listings() -> list[dict[str, Any]]:
-    if not LISTINGS_FILE.exists():
-        print(f"[database] {LISTINGS_FILE} not found. Creating an empty listing store.")
-        _save_listings([])
-        return []
-
-    with LISTINGS_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    if not isinstance(data, list):
-        raise ValueError(f"{LISTINGS_FILE} must contain a JSON array.")
-
-    return data
-
-
-def _save_listings(listings: list[dict[str, Any]]) -> None:
-    LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(LISTINGS_FILE, "w", encoding="utf-8") as file:
-        json.dump(listings, file, indent=2, ensure_ascii=False)
-        file.write("\n")
-
+# ── Legacy Compatibility Layer ────────────────────────────────────────────────
 
 def get_approved_listing() -> dict[str, Any] | None:
     """Return the first listing whose status is approved."""
-    print("[database] Checking listings.json for approved listings...")
-    with _LISTINGS_LOCK:
-        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
-            listings = _load_listings()
-
-            for listing in listings:
-                if listing.get("status") == "approved":
-                    listing_id = listing.get("id", "<missing id>")
-                    print(f"[database] Found approved listing: {listing_id}")
-                    return dict(listing)
-
-    print("[database] No approved listing found.")
+    try:
+        engine = DatabaseEngine()
+        response = engine.client.table("listings").select("*").eq("status", "approved").order("created_at", desc=True).limit(1).execute()
+        if response.data:
+            row = response.data[0]
+            return {
+                "id": str(row["id"]),
+                "status": row["status"],
+                "final_text": row.get("final_approved_text"),
+                "image_paths": row.get("original_assets", []),
+                "target_profile": row.get("profile_id"),
+                "generated_captions": row.get("generated_captions"),
+            }
+    except Exception as exc:
+        print(f"[database] get_approved_listing failed: {exc}")
     return None
 
 
 def update_listing_status(listing_id: str, new_status: str) -> None:
-    """Update a listing status in listings.json."""
+    """Update a listing status in the database."""
     if not listing_id:
         raise ValueError("listing_id is required.")
-
     if not new_status:
         raise ValueError("new_status is required.")
 
-    print(f"[database] Updating listing {listing_id} status to '{new_status}'...")
-    with _LISTINGS_LOCK:
-        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
-            listings = _load_listings()
-
-            for listing in listings:
-                if listing.get("id") == listing_id:
-                    listing["status"] = new_status
-                    _save_listings(listings)
-                    print(f"[database] Listing {listing_id} status updated to '{new_status}'.")
-                    return
-
-    raise ValueError(f"Listing not found in {LISTINGS_FILE}: {listing_id}")
+    engine = DatabaseEngine()
+    response = engine.client.table("listings").update({"status": new_status}).eq("id", listing_id).execute()
+    if not response.data:
+        raise ValueError(f"Listing not found in Supabase: {listing_id}")
 
 
 class FirestoreManager:

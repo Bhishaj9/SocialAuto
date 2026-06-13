@@ -9,3 +9,6 @@ fb_browser_profile/
 graphify-out/
 local_storage/
 listings.json
+.env.local
+supabase/.temp/
+supabase/.branches/

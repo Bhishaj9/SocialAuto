@@ -159,20 +159,15 @@ def approve_draft(draft_payload: dict[str, Any]) -> None:
 
 
 def _read_listing_status(draft_id: str) -> str | None:
-    if not LISTINGS_FILE.exists():
-        return None
-
-    with LISTINGS_FILE.open("r", encoding="utf-8") as listings_file:
-        listings = json.load(listings_file)
-
-    if not isinstance(listings, list):
-        raise AssertionError("listings.json must contain a JSON array.")
-
-    for listing in listings:
-        if isinstance(listing, dict) and listing.get("id") == draft_id:
-            status = listing.get("status")
-            return str(status) if status is not None else None
-
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/listings", timeout=10)
+        if response.status_code == 200:
+            payload = response.json()
+            for listing in payload.get("listings", []):
+                if listing.get("id") == draft_id:
+                    return listing.get("status")
+    except Exception as exc:
+        print(f"[TEST] Failed to query listing status from API: {exc}")
     return None
 
 

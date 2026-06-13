@@ -3,28 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import json
 import os
-import tempfile
-import threading
 import uuid
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from database import DatabaseEngine
+from storage import StorageEngine
 from niyanth import run_governed_pipeline
 
 ROOT_DIR = Path(__file__).resolve().parent
-LISTINGS_FILE = ROOT_DIR / "listings.json"
-LISTINGS_LOCK_FILE = ROOT_DIR / "listings.json.lock"
 LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", "/app/local_storage"))
 
 app = FastAPI(title="AutoBVB Listings Bridge", version="1.0.0")
-_listings_lock = threading.Lock()
+
+# Initialize Engine Singletons
+db_engine = DatabaseEngine()
+storage_engine = StorageEngine()
 
 
 class ApproveDraftRequest(BaseModel):
@@ -32,60 +32,6 @@ class ApproveDraftRequest(BaseModel):
     final_approved_text: str = Field(..., min_length=1)
     image_paths: list[str] = Field(..., min_length=1)
     target_profile: str = Field(..., min_length=1)
-
-
-@contextmanager
-def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock_file:
-        if os.name == "nt":
-            import msvcrt
-
-            lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-
-def _load_listings() -> list[dict[str, Any]]:
-    if not LISTINGS_FILE.exists():
-        print(f"[api] {LISTINGS_FILE} not found. Initializing empty listing store.")
-        return []
-
-    try:
-        with LISTINGS_FILE.open("r", encoding="utf-8") as file:
-            data = json.load(file)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=500, detail="Listings database is invalid JSON.") from exc
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Unable to read listings database.") from exc
-
-    if not isinstance(data, list):
-        raise HTTPException(status_code=500, detail="Listings database must contain a JSON array.")
-
-    return data
-
-
-def _save_listings(listings: list[dict[str, Any]]) -> None:
-    LISTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with LISTINGS_FILE.open("w", encoding="utf-8") as file:
-            json.dump(listings, file, indent=2, ensure_ascii=False)
-            file.write("\n")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Unable to write listings database.") from exc
 
 
 def _safe_upload_name(upload: UploadFile, index: int) -> str:
@@ -116,34 +62,6 @@ def _profile_dir(profile_id: str) -> Path:
         raise HTTPException(status_code=400, detail="profile_id resolved outside profile storage.")
 
     return profile_path
-
-
-def _write_json_atomic(destination: Path, payload: Any) -> None:
-    """Atomic write via temp-file + os.replace.
-
-    Safe for normal host-side paths.  Do NOT call this for paths that live
-    on a Docker bind-mount overlay — use a direct open() write there instead.
-    """
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=destination.parent,
-            delete=False,
-            suffix=".tmp",
-        ) as temp_file:
-            json.dump(payload, temp_file, indent=2, ensure_ascii=False)
-            temp_file.write("\n")
-            temp_path = Path(temp_file.name)
-
-        os.replace(temp_path, destination)
-    except OSError as exc:
-        if temp_path is not None and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail="Unable to write JSON file.") from exc
 
 
 async def _save_uploaded_images(draft_id: str, images: list[UploadFile]) -> list[str]:
@@ -187,14 +105,40 @@ async def generate_draft(
         raise HTTPException(status_code=400, detail="At least one image is required.")
 
     safe_target_profile = _validate_profile_id(target_profile)
-    draft_id = uuid.uuid4().hex
+    draft_id = str(uuid.uuid4())
     print(
         f"[api] Received draft request {draft_id} for profile {safe_target_profile} "
         f"with {len(images)} image(s)."
     )
 
+    # 1. Save local image files first to read their binaries and pass to Governor Agent
     saved_image_paths = await _save_uploaded_images(draft_id, images)
 
+    # 2. Stream local file binaries directly to the Supabase property-assets bucket
+    public_urls: list[str] = []
+    for local_path in saved_image_paths:
+        filename = Path(local_path).name
+        remote_path = f"drafts/{draft_id}/{filename}"
+        public_url = storage_engine.upload_file(local_path, remote_path)
+        if not public_url:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to upload property asset {filename} to Supabase storage."
+            )
+        public_urls.append(public_url)
+
+    # 3. Insert listing record into local database cluster in 'pending' state
+    try:
+        db_engine.create_listing(
+            profile_id=safe_target_profile,
+            original_assets=public_urls,
+            listing_id=draft_id
+        )
+    except Exception as exc:
+        print(f"[api] Failed to create database record: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to initialize listing in database.") from exc
+
+    # 4. Generate the 3 preview variations out-of-band using the Governor Agent
     try:
         generated_captions = await asyncio.to_thread(
             run_governed_pipeline,
@@ -206,6 +150,13 @@ async def generate_draft(
     except Exception as exc:
         print(f"[api] Draft pipeline failed for {draft_id}: {exc}")
         raise HTTPException(status_code=500, detail="Draft generation failed.") from exc
+
+    # 5. Call database update draft captions before returning
+    try:
+        db_engine.update_draft_captions(draft_id, generated_captions)
+    except Exception as exc:
+        print(f"[api] Failed to update draft captions: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to save generated captions.") from exc
 
     print(f"[api] Draft {draft_id} generated successfully for human review.")
     return {
@@ -220,21 +171,16 @@ async def generate_draft(
 def approve_draft(request: ApproveDraftRequest) -> dict[str, str]:
     print(f"[api] Approval received for draft {request.draft_id}.")
 
-    listing: dict[str, Any] = {
-        "id": request.draft_id,
-        "status": "approved",
-        "final_text": request.final_approved_text,
-        "image_paths": request.image_paths,
-        "target_profile": _validate_profile_id(request.target_profile),
-    }
+    try:
+        db_engine.approve_listing(
+            listing_id=request.draft_id,
+            final_approved_text=request.final_approved_text
+        )
+    except Exception as exc:
+        print(f"[api] Failed to approve listing: {exc}")
+        raise HTTPException(status_code=500, detail=f"Database error during approval: {exc}") from exc
 
-    with _listings_lock:
-        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
-            listings = _load_listings()
-            listings.append(listing)
-            _save_listings(listings)
-
-    print(f"[api] Draft {request.draft_id} approved and queued in {LISTINGS_FILE}.")
+    print(f"[api] Draft {request.draft_id} approved and marked visible for worker loops.")
     return {"status": "success", "message": "Draft approved and queued for posting"}
 
 
@@ -261,7 +207,6 @@ async def upload_account_state(
     safe_profile_id = _validate_profile_id(profile_id)
     profile_path = _profile_dir(safe_profile_id)
     state_path = profile_path / "fb_state.json"
-    lock_path = profile_path / "fb_state.json.lock"
 
     print(f"[api] Received state upload for profile {safe_profile_id}.")
 
@@ -276,24 +221,20 @@ async def upload_account_state(
     finally:
         await file.close()
 
-    with _exclusive_file_lock(lock_path):
-        # Direct truncate-and-write pattern: intentionally avoids os.replace()
-        # rename semantics, which the Linux kernel rejects across Docker
-        # bind-mount overlay layers (EXDEV / "Invalid cross-device link").
-        try:
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(parsed_state, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-        except OSError as exc:
-            print(
-                f"[api] ERROR writing state file — "
-                f"path={state_path!r} errno={exc.errno} strerror={exc.strerror!r}"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Unable to write state file: {exc.strerror}",
-            ) from exc
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(parsed_state, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as exc:
+        print(
+            f"[api] ERROR writing state file — "
+            f"path={state_path!r} errno={exc.errno} strerror={exc.strerror!r}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to write state file: {exc.strerror}",
+        ) from exc
 
     print(f"[api] Account profile {safe_profile_id} initialized at {state_path}.")
     return {
@@ -305,9 +246,11 @@ async def upload_account_state(
 
 @app.get("/api/listings")
 def list_listings() -> dict[str, list[dict[str, Any]]]:
-    with _listings_lock:
-        with _exclusive_file_lock(LISTINGS_LOCK_FILE):
-            listings = _load_listings()
+    try:
+        listings = db_engine.list_listings()
+    except Exception as exc:
+        print(f"[api] Failed to list listings: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to fetch listings.") from exc
 
     print(f"[api] Returning {len(listings)} listing status record(s).")
     return {"listings": listings}
