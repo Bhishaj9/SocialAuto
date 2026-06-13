@@ -78,47 +78,22 @@ STEALTH_CHROMIUM_ARGS = [
 VIEWPORT = {"width": 1280, "height": 720}
 
 
-# ── Profile Resolution ───────────────────────────────────────────────────────
-
-def _resolve_profile(target_profile: str) -> Path:
-    """Resolve and validate the fb_state.json path for a target profile.
-
-    Returns the absolute Path to the state file. Raises FileNotFoundError
-    if the profile directory or state file does not exist.
-    """
-    if not PROFILE_ID_PATTERN.fullmatch(target_profile) or target_profile in {".", ".."}:
-        raise ValueError(f"Unsafe target_profile identifier: {target_profile!r}")
-
-    profiles_root = (LOCAL_STORAGE_DIR / "profiles").resolve()
-    profile_dir = (profiles_root / target_profile).resolve()
-
-    # Path traversal guard: ensure resolved path is under profiles_root.
-    if profiles_root not in profile_dir.parents and profile_dir != profiles_root:
-        raise ValueError(f"Profile resolved outside storage: {target_profile}")
-
-    state_file = profile_dir / "fb_state.json"
-    if not state_file.is_file():
-        raise FileNotFoundError(
-            f"Session state not found for profile '{target_profile}': {state_file}"
-        )
-
-    return state_file
-
 
 # ── Browser Context Factory ─────────────────────────────────────────────────
 
 async def _launch_context(
     playwright_instance,
-    state_file: Path,
+    state_file: str | Path,
     profile_id: str,
 ) -> tuple[Browser | None, BrowserContext]:
     """Launch a Playwright Chromium browser and create a persistent stealth context.
 
     Uses Playwright's launch_persistent_context() to map the browser cache
-    directly to ROOT_DIR / "fb_browser_profile" / profile_id, with headless=False
+    directly to os.path.join(local_storage, "browser_contexts", profile_id), with headless=False
     and stealth configuration.
     """
-    user_data_dir = ROOT_DIR / "fb_browser_profile" / profile_id
+    local_storage_base = os.getenv("AUTOBVB_LOCAL_STORAGE", "local_storage")
+    user_data_dir = os.path.join(local_storage_base, "browser_contexts", profile_id)
     print(f"[Worker] Launching persistent stealth Chromium browser (headless={HEADLESS})...")
     print(f"[Worker]   User-Agent: {STEALTH_USER_AGENT[:60]}...")
     print(f"[Worker]   Viewport:   {VIEWPORT['width']}x{VIEWPORT['height']}")
@@ -126,10 +101,12 @@ async def _launch_context(
     print(f"[Worker]   User Data:  {user_data_dir}")
 
     # Read the state file and normalise to Playwright's expected format.
-    raw_state = json.loads(state_file.read_text(encoding="utf-8"))
+    state_file_path = Path(state_file) if isinstance(state_file, str) else state_file
+    raw_state = json.loads(state_file_path.read_text(encoding="utf-8"))
     if isinstance(raw_state, list):
         # Flat cookie array → wrap into Playwright storage_state structure.
         raw_state = {"cookies": raw_state, "origins": []}
+
 
     context = await playwright_instance.chromium.launch_persistent_context(
         user_data_dir=user_data_dir,
@@ -263,10 +240,13 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
 
     try:
         # ── Extract and validate task payload ────────────────────────────
-        target_profile = listing.get("profile_id", "test_agent_01")
-        if not isinstance(target_profile, str) or not target_profile.strip():
-            target_profile = "test_agent_01"
-        target_profile = target_profile.strip()
+        profile_id = listing.get("profile_id", "default_profile")
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            profile_id = "default_profile"
+        profile_id = profile_id.strip()
+
+        if not PROFILE_ID_PATTERN.fullmatch(profile_id) or profile_id in {".", ".."}:
+            raise ValueError(f"Unsafe profile_id identifier: {profile_id!r}")
 
         final_text = listing.get("final_approved_text", "")
         if not isinstance(final_text, str) or not final_text.strip():
@@ -284,12 +264,26 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
 
         print(f"[Worker] == Task Payload ==")
         print(f"[Worker]   Listing ID : {listing_id}")
-        print(f"[Worker]   Profile    : {target_profile}")
+        print(f"[Worker]   Profile    : {profile_id}")
         print(f"[Worker]   Caption    : {final_text[:80]}...")
         print(f"[Worker]   Images URL : {len(original_assets)} URL(s)")
 
-        # ── Resolve profile and download images ───────────────────────────
-        state_file = _resolve_profile(target_profile)
+        # Dynamic Profile Path Resolution:
+        local_storage_base = os.getenv("AUTOBVB_LOCAL_STORAGE", "local_storage")
+        state_dir = os.path.join(local_storage_base, "profiles", profile_id)
+        state_file = os.path.join(state_dir, "fb_state.json")
+
+        # Graceful Failures for Missing States:
+        if not os.path.isfile(state_file):
+            print(f"[Worker] Missing authentication state file for Profile: {profile_id} at {state_file}")
+            try:
+                db_engine.mark_failed(
+                    listing_id,
+                    error_message=f"Authentication profile state missing for {profile_id}. Please upload state file."
+                )
+            except Exception as status_exc:
+                print(f"[Worker] CRITICAL: Failed to update status to 'failed': {status_exc}")
+            return
 
         # Download images into a temporary directory
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -300,7 +294,7 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
                 raise FileNotFoundError(f"Listing {listing_id}: failed to download any valid image files.")
 
             async with async_playwright() as pw:
-                browser, context = await _launch_context(pw, state_file, target_profile)
+                browser, context = await _launch_context(pw, state_file, profile_id)
                 page: Page = await context.new_page()
                 await page.set_viewport_size(VIEWPORT)
 

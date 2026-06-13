@@ -183,6 +183,7 @@
 <label class="font-title-md text-title-md text-ink">Upload Property Image Media Assets</label>
 <p class="font-body-md text-body-md text-secondary mb-xs">Provide high-resolution architectural photography. JPEGs and PNGs accepted.</p>
 <div class="w-full border-2 border-dashed border-outline-variant rounded-xl p-xl flex flex-col items-center justify-center gap-md bg-surface transition-colors hover:bg-surface-container-low cursor-pointer group" id="drop-zone">
+<input type="file" id="file-input" class="hidden" multiple accept="image/jpeg, image/png" />
 <div class="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center group-hover:bg-primary-fixed transition-colors">
 <span class="material-symbols-outlined text-tertiary group-hover:text-primary transition-colors" data-icon="cloud_upload" style="font-size: 32px;">cloud_upload</span>
 </div>
@@ -195,16 +196,21 @@
 </div>
 <!-- Action Area -->
 <div class="mt-md flex justify-end">
-<button class="bg-primary hover:bg-primary-active text-on-primary font-title-md text-title-md rounded-lg h-12 px-xl transition-colors duration-200 ease-in-out flex items-center gap-sm">
+<button id="generate-btn" class="bg-primary hover:bg-primary-active text-on-primary font-title-md text-title-md rounded-lg h-12 px-xl transition-colors duration-200 ease-in-out flex items-center gap-sm">
 <span class="material-symbols-outlined" data-icon="auto_awesome" style="font-size: 20px;">auto_awesome</span>
                     Generate AI Variations
                 </button>
 </div>
+<div id="status-message" class="mt-4 text-center font-title-md"></div>
 </section>
 </main>
 <script>
         // Simple visual feedback for drag and drop zone
         const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const brokerIdInput = document.getElementById('broker-id');
+        const generateBtn = document.getElementById('generate-btn');
+        const statusMessage = document.getElementById('status-message');
         
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             dropZone.addEventListener(eventName, preventDefaults, false);
@@ -232,5 +238,101 @@
             dropZone.classList.remove('bg-primary-fixed', 'border-primary');
             dropZone.classList.add('bg-surface', 'border-outline-variant');
         }
+
+        // File Handling: Bind click listener to #drop-zone that triggers #file-input
+        dropZone.addEventListener('click', (e) => {
+            if (e.target !== fileInput) {
+                fileInput.click();
+            }
+        });
+
+        fileInput.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Update #drop-zone text to show the number of files selected
+        fileInput.addEventListener('change', () => {
+            const textCenter = dropZone.querySelector('.text-center');
+            if (textCenter) {
+                if (fileInput.files && fileInput.files.length > 0) {
+                    textCenter.innerHTML = `<span class="font-title-md text-title-md text-primary">${fileInput.files.length} file(s) selected</span>`;
+                } else {
+                    textCenter.innerHTML = `
+                        <span class="font-title-md text-title-md text-primary">Click to upload</span>
+                        <span class="font-body-md text-body-md text-secondary"> or drag and drop</span>
+                    `;
+                }
+            }
+        });
+
+        // Support drag & drop file injection
+        dropZone.addEventListener('drop', (e) => {
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                fileInput.dispatchEvent(new Event('change'));
+            }
+        });
+
+        // Submission Logic
+        generateBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            statusMessage.className = "mt-4 text-center font-title-md";
+            statusMessage.textContent = "";
+
+            const brokerIdVal = brokerIdInput.value.trim();
+            const filesCount = fileInput.files ? fileInput.files.length : 0;
+
+            if (!brokerIdVal || filesCount === 0) {
+                statusMessage.className = "mt-4 text-center font-title-md text-red-600";
+                statusMessage.textContent = "Error: Target Broker Profile ID and file upload are required.";
+                return;
+            }
+
+            // Change button text and disable it
+            const originalBtnContent = generateBtn.innerHTML;
+            generateBtn.innerText = "Generating...";
+            generateBtn.disabled = true;
+
+            // Create FormData object
+            const formData = new FormData();
+            formData.append('profile_id', brokerIdVal);
+            // Also append compatibility parameters for FastAPI backend
+            formData.append('target_profile', brokerIdVal);
+            formData.append('flat_details', 'Ingestion Dashboard Draft Intake');
+            formData.append('contact_number', '+91-0000000000');
+
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('files', fileInput.files[i]);
+                formData.append('images', fileInput.files[i]); // FastAPI expects images key
+            }
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/generate-draft', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    statusMessage.className = "mt-4 text-center font-title-md text-green-600";
+                    statusMessage.textContent = "Draft successfully generated!";
+                    
+                    // Reset Form
+                    brokerIdInput.value = '';
+                    fileInput.value = '';
+                    fileInput.dispatchEvent(new Event('change'));
+                } else {
+                    const errorMsg = await response.text();
+                    statusMessage.className = "mt-4 text-center font-title-md text-red-600";
+                    statusMessage.textContent = `Error: ${errorMsg || response.statusText}`;
+                }
+            } catch (err) {
+                console.error("Network error during draft generation:", err);
+                statusMessage.className = "mt-4 text-center font-title-md text-red-600";
+                statusMessage.textContent = "Network error: Failed to connect to the API server.";
+            } finally {
+                generateBtn.innerHTML = originalBtnContent;
+                generateBtn.disabled = false;
+            }
+        });
     </script>
 </body></html>

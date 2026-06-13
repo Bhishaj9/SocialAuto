@@ -37,10 +37,13 @@ storage_engine = StorageEngine()
 
 
 class ApproveDraftRequest(BaseModel):
-    draft_id: str = Field(..., min_length=1)
-    final_approved_text: str = Field(..., min_length=1)
-    image_paths: list[str] = Field(..., min_length=1)
-    target_profile: str = Field(..., min_length=1)
+    draft_id: str | None = Field(None)
+    listing_id: str | None = Field(None)
+    final_approved_text: str | None = Field(None)
+    final_text: str | None = Field(None)
+    image_paths: list[str] | None = Field(default_factory=list)
+    target_profile: str | None = Field(None)
+
 
 
 def _safe_upload_name(upload: UploadFile, index: int) -> str:
@@ -104,24 +107,28 @@ async def _save_uploaded_images(draft_id: str, images: list[UploadFile]) -> list
 
 @app.post("/api/generate-draft")
 async def generate_draft(
-    flat_details: str = Form(...),
-    contact_number: str = Form(...),
+    flat_details: str | None = Form(None),
+    contact_number: str | None = Form(None),
     custom_instruction: str | None = Form(None),
-    target_profile: str = Form("default_profile"),
-    images: list[UploadFile] = File(...),
+    target_profile: str | None = Form(None),
+    profile_id: str | None = Form(None),
+    images: list[UploadFile] | None = File(None),
+    files: list[UploadFile] | None = File(None),
 ) -> dict[str, Any]:
-    if not images:
+    actual_images = files or images
+    if not actual_images:
         raise HTTPException(status_code=400, detail="At least one image is required.")
 
-    safe_target_profile = _validate_profile_id(target_profile)
+    actual_profile = profile_id or target_profile or "default_profile"
+    safe_target_profile = _validate_profile_id(actual_profile)
     draft_id = str(uuid.uuid4())
     print(
         f"[api] Received draft request {draft_id} for profile {safe_target_profile} "
-        f"with {len(images)} image(s)."
+        f"with {len(actual_images)} image(s)."
     )
 
     # 1. Save local image files first to read their binaries and pass to Governor Agent
-    saved_image_paths = await _save_uploaded_images(draft_id, images)
+    saved_image_paths = await _save_uploaded_images(draft_id, actual_images)
 
     # 2. Stream local file binaries directly to the Supabase property-assets bucket
     public_urls: list[str] = []
@@ -148,12 +155,14 @@ async def generate_draft(
         raise HTTPException(status_code=500, detail="Failed to initialize listing in database.") from exc
 
     # 4. Generate the 3 preview variations out-of-band using the Governor Agent
+    actual_flat_details = flat_details or "Generic Property Details"
+    actual_contact_number = contact_number or "+91-0000000000"
     try:
         generated_captions = await asyncio.to_thread(
             run_governed_pipeline,
             saved_image_paths,
-            flat_details,
-            contact_number,
+            actual_flat_details,
+            actual_contact_number,
             custom_instruction,
         )
     except Exception as exc:
@@ -178,18 +187,28 @@ async def generate_draft(
 
 @app.post("/api/approve-draft")
 def approve_draft(request: ApproveDraftRequest) -> dict[str, str]:
-    print(f"[api] Approval received for draft {request.draft_id}.")
+    # Resolve draft ID (draft_id or listing_id)
+    draft_id = request.listing_id or request.draft_id
+    if not draft_id:
+        raise HTTPException(status_code=422, detail="listing_id or draft_id is required.")
+
+    # Resolve final text (final_text or final_approved_text)
+    final_approved_text = request.final_text or request.final_approved_text
+    if final_approved_text is None:
+        raise HTTPException(status_code=422, detail="final_text or final_approved_text is required.")
+
+    print(f"[api] Approval received for draft {draft_id}.")
 
     try:
         db_engine.approve_listing(
-            listing_id=request.draft_id,
-            final_approved_text=request.final_approved_text
+            listing_id=draft_id,
+            final_approved_text=final_approved_text
         )
     except Exception as exc:
         print(f"[api] Failed to approve listing: {exc}")
         raise HTTPException(status_code=500, detail=f"Database error during approval: {exc}") from exc
 
-    print(f"[api] Draft {request.draft_id} approved and marked visible for worker loops.")
+    print(f"[api] Draft {draft_id} approved and marked visible for worker loops.")
     return {"status": "success", "message": "Draft approved and queued for posting"}
 
 

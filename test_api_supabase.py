@@ -109,7 +109,7 @@ def main() -> None:
         
         print(f"[SUCCESS] Final database state for listing {draft_id} verified as 'approved' with the correct caption.")
         print("=" * 60)
-        print("All verification steps passed successfully! 🚀")
+        print("All verification steps passed successfully! [SUCCESS]")
         print("=" * 60)
 
     finally:

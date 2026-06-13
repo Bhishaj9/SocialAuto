@@ -261,30 +261,14 @@
 <h3 class="font-title-md text-title-md text-ink">Active Codes</h3>
 <button class="text-secondary hover:text-ink"><span class="material-symbols-outlined" data-icon="filter_list">filter_list</span></button>
 </div>
-<div class="flex-1 overflow-y-auto pr-sm space-y-md custom-scrollbar">
-<!-- Queue Item Active -->
-<div class="p-md rounded-xl bg-surface-container border-l-2 border-primary cursor-pointer transition-colors">
+<div id="queue-container" class="flex-1 overflow-y-auto pr-sm space-y-md custom-scrollbar">
+<!-- Queue Item Template -->
+<div id="queue-template" class="p-md rounded-xl bg-surface-container border-l-2 border-primary cursor-pointer transition-colors hidden">
 <div class="flex justify-between items-start mb-sm">
 <span class="font-code text-code text-ink font-medium">BVB-892A</span>
 <span class="px-2 py-1 rounded-full bg-surface text-ink font-caption-up text-[10px] uppercase border border-hairline">Pending</span>
 </div>
 <p class="font-body-md text-sm text-secondary truncate">142 Highland Terrace</p>
-</div>
-<!-- Queue Item -->
-<div class="p-md rounded-xl hover:bg-surface-container border border-transparent cursor-pointer transition-colors">
-<div class="flex justify-between items-start mb-sm">
-<span class="font-code text-code text-ink font-medium">BVB-891F</span>
-<span class="px-2 py-1 rounded-full bg-primary text-on-primary font-caption-up text-[10px] uppercase">Approved</span>
-</div>
-<p class="font-body-md text-sm text-secondary truncate">88 Beacon Street, Unit 4</p>
-</div>
-<!-- Queue Item -->
-<div class="p-md rounded-xl hover:bg-surface-container border border-transparent cursor-pointer transition-colors">
-<div class="flex justify-between items-start mb-sm">
-<span class="font-code text-code text-ink font-medium">BVB-890C</span>
-<span class="px-2 py-1 rounded-full bg-surface text-ink font-caption-up text-[10px] uppercase border border-hairline">Pending</span>
-</div>
-<p class="font-body-md text-sm text-secondary truncate">200 Clarendon Suite 10</p>
 </div>
 </div>
 </div>
@@ -292,17 +276,17 @@
 <div class="flex-1 flex flex-col md:flex-row bg-[#efe9de] rounded-xl overflow-hidden shadow-sm h-full">
 <!-- Left Half: Visual Property Photo Frame -->
 <div class="w-full md:w-1/2 h-64 md:h-full relative overflow-hidden bg-surface-container-high">
-<img alt="Property Exterior" class="w-full h-full object-cover" data-alt="A high-end architectural photograph of a luxurious modern home exterior at twilight. The house features clean geometric lines, large expansive glass windows emitting a warm inviting glow, and natural stone accents. The composition is highly symmetrical and polished, suitable for a premium real estate magazine spread. The surrounding landscaping is minimalist and manicured." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCMkcV5oDfcV4VLjWXKG7js9B8j9OH-QIKObZ8D4KcMP76lOqgaG4DI4RPK9u8figsQ6Pc4rWN1mlg08l58WjmbfSKdRr9gzDFh9zHYjSZhfXtih5sdLrYyd4_OTxL8YnQBY7ZcUqvsPoD3Wq-oN8m7p_Fb529sTYhigq_QMJSKtaNvHHiyCd5prRCqTjHyBS832OY1BGD_sRcdkQ1ymqcBqTw2eLHVzmYPimuvQ94oc_AyVuKmsoxyNuNF3GDBFygBBNdSSn55ZaHU"/>
+<img id="preview-image" alt="Property Exterior" class="w-full h-full object-cover" data-alt="A high-end architectural photograph of a luxurious modern home exterior at twilight. The house features clean geometric lines, large expansive glass windows emitting a warm inviting glow, and natural stone accents. The composition is highly symmetrical and polished, suitable for a premium real estate magazine spread. The surrounding landscaping is minimalist and manicured." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCMkcV5oDfcV4VLjWXKG7js9B8j9OH-QIKObZ8D4KcMP76lOqgaG4DI4RPK9u8figsQ6Pc4rWN1mlg08l58WjmbfSKdRr9gzDFh9zHYjSZhfXtih5sdLrYyd4_OTxL8YnQBY7ZcUqvsPoD3Wq-oN8m7p_Fb529sTYhigq_QMJSKtaNvHHiyCd5prRCqTjHyBS832OY1BGD_sRcdkQ1ymqcBqTw2eLHVzmYPimuvQ94oc_AyVuKmsoxyNuNF3GDBFygBBNdSSn55ZaHU"/>
 <div class="absolute top-lg left-lg right-lg flex justify-between items-start">
 <div class="bg-surface/90 backdrop-blur-sm px-md py-sm rounded-lg border border-hairline/50">
-<span class="font-code text-code text-ink block mb-1">BVB-892A</span>
+<span id="preview-id" class="font-code text-code text-ink block mb-1">BVB-892A</span>
 <span class="font-title-md text-title-md text-ink">142 Highland Terrace</span>
 </div>
 <button class="w-10 h-10 rounded-full bg-surface/90 backdrop-blur-sm flex items-center justify-center text-ink hover:bg-white transition-colors border border-hairline/50">
 <span class="material-symbols-outlined" data-icon="open_in_new">open_in_new</span>
 </button>
 </div>
-<div class="absolute bottom-lg left-lg right-lg flex gap-sm overflow-x-auto pb-2 no-scrollbar">
+<div id="thumbnail-container" class="absolute bottom-lg left-lg right-lg flex gap-sm overflow-x-auto pb-2 no-scrollbar">
 <div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-primary shrink-0">
 <img alt="Thumb 1" class="w-full h-full object-cover" data-alt="Thumbnail view of a modern luxury home exterior at twilight, featuring expansive windows and warm interior lighting. High contrast and sharp focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfP_lfkop4wU7lEaip9EUA18K2Fh6FWLEfa2gY9L6zO3mjnvFxBzDWJSC6eAdfKIJG2G-VgZUiPmgIrz7g5l89Tb86c-CklJDxp-rGs7Tagg63cW8NeYj1mUX1cN8bQzrC-HS9zDPNmsWsRAGAItXP2ZbrYmsU4nSobVZkkLbRQfkbldxqkZ1N4iWvehhUjK4GQ_fUu5oFYy11LZKvgzbtaCWvJehsPdF_XKdzoWBAkcsqRHQgMsIQgSQzVXx1WBRvpLNhUW-kD0dz"/>
 </div>
@@ -323,7 +307,7 @@
 </div>
 <div class="flex flex-col gap-md flex-1">
 <label class="font-caption-up text-caption-up text-tertiary-fixed-dim uppercase tracking-wider">Editorial Copy</label>
-<textarea class="w-full flex-1 bg-transparent border border-[#2f312e] rounded-lg p-md font-body-md text-surface focus:border-primary focus:ring-0 resize-none transition-colors leading-relaxed" placeholder="Review and edit the narrative...">Nestled in the prestigious highlands, this architectural masterpiece seamlessly blends contemporary precision with organic warmth. The expansive open-plan living spaces are anchored by floor-to-ceiling glass, inviting the majestic surrounding landscape indoors. A chef's kitchen, clad in honed marble and bespoke walnut cabinetry, serves as the heart of the home, ideal for both intimate gatherings and grand-scale entertaining. Every detail, from the wide-plank European oak flooring to the custom architectural lighting, has been meticulously curated to offer an unparalleled standard of modern luxury.</textarea>
+<textarea id="caption-editor" class="w-full flex-1 bg-transparent border border-[#2f312e] rounded-lg p-md font-body-md text-surface focus:border-primary focus:ring-0 resize-none transition-colors leading-relaxed" placeholder="Review and edit the narrative...">Nestled in the prestigious highlands, this architectural masterpiece seamlessly blends contemporary precision with organic warmth. The expansive open-plan living spaces are anchored by floor-to-ceiling glass, inviting the majestic surrounding landscape indoors. A chef's kitchen, clad in honed marble and bespoke walnut cabinetry, serves as the heart of the home, ideal for both intimate gatherings and grand-scale entertaining. Every detail, from the wide-plank European oak flooring to the custom architectural lighting, has been meticulously curated to offer an unparalleled standard of modern luxury.</textarea>
 </div>
 <div class="mt-lg pt-lg border-t border-[#2f312e] flex flex-col gap-sm">
 <div class="flex justify-between items-center text-sm">
@@ -338,11 +322,11 @@
 </div>
 <!-- Bottom Action Row -->
 <div class="p-xl bg-[#181715] border-t border-[#2f312e] flex gap-md mt-auto shrink-0">
-<button class="flex-1 bg-primary text-on-primary font-title-md text-title-md py-[14px] px-lg rounded-lg hover:bg-primary-active transition-colors flex items-center justify-center gap-sm">
+<button id="approve-btn" class="flex-1 bg-primary text-on-primary font-title-md text-title-md py-[14px] px-lg rounded-lg hover:bg-primary-active transition-colors flex items-center justify-center gap-sm">
 <span class="material-symbols-outlined text-sm" data-icon="lock">lock</span>
                             Lock &amp; Release to Worker Queue
                         </button>
-<button class="px-lg py-[14px] bg-transparent border border-[#2f312e] text-surface font-title-md text-title-md rounded-lg hover:bg-[#252320] transition-colors flex items-center justify-center">
+<button id="reject-btn" class="px-lg py-[14px] bg-transparent border border-[#2f312e] text-surface font-title-md text-title-md rounded-lg hover:bg-[#252320] transition-colors flex items-center justify-center">
                             Reject Variant
                         </button>
 </div>
@@ -388,4 +372,161 @@
             scrollbar-width: none;
         }
     </style>
+    <script>
+        let activeListingId = null;
+
+        async function fetchQueue() {
+            const queueContainer = document.getElementById('queue-container');
+            const queueTemplate = document.getElementById('queue-template');
+            if (!queueContainer || !queueTemplate) return;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/listings');
+                if (!response.ok) {
+                    console.error("Failed to fetch listings from backend:", response.statusText);
+                    return;
+                }
+                const data = await response.json();
+
+                // Clear queue-container except for the template
+                queueContainer.innerHTML = '';
+                queueContainer.appendChild(queueTemplate);
+
+                data.forEach(listing => {
+                    const item = queueTemplate.cloneNode(true);
+                    item.removeAttribute('id');
+                    item.classList.remove('hidden');
+
+                    const shortId = listing.id ? listing.id.slice(0, 8) : '';
+                    const profileId = listing.profile_id || 'Unknown';
+                    
+                    // Populate short ID or profile ID, and status
+                    const fontCodeSpan = item.querySelector('.font-code');
+                    if (fontCodeSpan) {
+                        fontCodeSpan.textContent = shortId;
+                    }
+                    
+                    const statusSpan = item.querySelector('.font-caption-up');
+                    if (statusSpan) {
+                        statusSpan.textContent = listing.status || 'Pending';
+                        // Add nice colors based on status
+                        if (listing.status === 'approved') {
+                            statusSpan.className = "px-2 py-1 rounded-full bg-green-100 text-green-800 font-caption-up text-[10px] uppercase border border-green-200";
+                        } else if (listing.status === 'pending') {
+                            statusSpan.className = "px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 font-caption-up text-[10px] uppercase border border-yellow-200";
+                        }
+                    }
+
+                    const descP = item.querySelector('p');
+                    if (descP) {
+                        descP.textContent = profileId;
+                    }
+
+                    // Click listener to load preview details
+                    item.addEventListener('click', () => {
+                        // Remove highlight from all queue items, add to current one
+                        queueContainer.querySelectorAll('.p-md').forEach(el => {
+                            el.classList.remove('bg-surface-container-high', 'border-primary-active');
+                            el.classList.add('bg-surface-container');
+                        });
+                        item.classList.add('bg-surface-container-high', 'border-primary-active');
+                        item.classList.remove('bg-surface-container');
+
+                        activeListingId = listing.id;
+
+                        // Update preview image
+                        const previewImage = document.getElementById('preview-image');
+                        if (previewImage) {
+                            if (listing.original_assets && listing.original_assets.length > 0) {
+                                previewImage.src = listing.original_assets[0];
+                            } else {
+                                // Fallback to placeholder if none exists
+                                previewImage.src = "https://lh3.googleusercontent.com/aida-public/AB6AXuCMkcV5oDfcV4VLjWXKG7js9B8j9OH-QIKObZ8D4KcMP76lOqgaG4DI4RPK9u8figsQ6Pc4rWN1mlg08l58WjmbfSKdRr9gzDFh9zHYjSZhfXtih5sdLrYyd4_OTxL8YnQBY7ZcUqvsPoD3Wq-oN8m7p_Fb529sTYhigq_QMJSKtaNvHHiyCd5prRCqTjHyBS832OY1BGD_sRcdkQ1ymqcBqTw2eLHVzmYPimuvQ94oc_AyVuKmsoxyNuNF3GDBFygBBNdSSn55ZaHU";
+                            }
+                        }
+
+                        // Update preview id
+                        const previewIdSpan = document.getElementById('preview-id');
+                        if (previewIdSpan) {
+                            previewIdSpan.textContent = shortId;
+                        }
+
+                        // Update caption editor
+                        const captionEditor = document.getElementById('caption-editor');
+                        if (captionEditor) {
+                            if (listing.generated_captions && listing.generated_captions.length > 0) {
+                                captionEditor.value = listing.generated_captions[0];
+                            } else {
+                                captionEditor.value = '';
+                            }
+                        }
+                    });
+
+                    queueContainer.appendChild(item);
+                });
+            } catch (err) {
+                console.error("Error fetching queue list:", err);
+            }
+        }
+
+        // Approval button click listener
+        const approveBtn = document.getElementById('approve-btn');
+        if (approveBtn) {
+            approveBtn.addEventListener('click', async () => {
+                if (!activeListingId) return;
+
+                const captionEditor = document.getElementById('caption-editor');
+                const finalText = captionEditor ? captionEditor.value : '';
+
+                const originalBtnContent = approveBtn.innerHTML;
+                approveBtn.innerText = "Approved!";
+                approveBtn.disabled = true;
+
+                try {
+                    const response = await fetch('http://127.0.0.1:8000/api/approve-draft', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            listing_id: activeListingId,
+                            draft_id: activeListingId, // Include draft_id too for API compatibility
+                            final_text: finalText,
+                            final_approved_text: finalText, // Include final_approved_text too
+                            image_paths: ["dummy"], // Include dummy image_paths for Pydantic schema validation compatibility
+                            target_profile: "dummy" // Include target_profile
+                        })
+                    });
+
+                    if (response.ok) {
+                        // Success - immediately call fetchQueue to refresh
+                        await fetchQueue();
+                    } else {
+                        const errMsg = await response.text();
+                        alert(`Failed to approve: ${errMsg}`);
+                        approveBtn.innerHTML = originalBtnContent;
+                        approveBtn.disabled = false;
+                    }
+                } catch (err) {
+                    console.error("Network error during approval:", err);
+                    alert("Network error occurred during approval request.");
+                    approveBtn.innerHTML = originalBtnContent;
+                    approveBtn.disabled = false;
+                } finally {
+                    // Automatically restore button after a delay if still disabled
+                    setTimeout(() => {
+                        if (approveBtn.disabled) {
+                            approveBtn.innerHTML = originalBtnContent;
+                            approveBtn.disabled = false;
+                        }
+                    }, 2000);
+                }
+            });
+        }
+
+        // Load data on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchQueue();
+        });
+    </script>
 </body></html>
