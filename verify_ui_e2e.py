@@ -175,8 +175,8 @@ def main():
         
         # 4. Playwright UI automation (Sync API)
         with sync_playwright() as p:
-            logger.info("[UI TEST] Launching headless Chromium...")
-            browser = p.chromium.launch(headless=True)
+            logger.info("[UI TEST] Launching visible Chromium (demo mode, slow_mo=1500ms)...")
+            browser = p.chromium.launch(headless=False, slow_mo=1500)
             page = browser.new_page()
             page.on("console", lambda msg: logger.info(f"[BROWSER CONSOLE] {msg.text}"))
             page.on("pageerror", lambda err: logger.error(f"[BROWSER PAGE ERROR] {err}"))
@@ -194,7 +194,9 @@ def main():
             logger.info(f"[UI TEST] Uploading file payload: {dummy_image_path}...")
             page.locator("#file-input").set_input_files(str(dummy_image_path))
             
-            logger.info("[UI TEST] Ingestion form submitted. Clicking Generate AI Variations...")
+            logger.info("[UI TEST] Ingestion form filled. Pausing 4s for audience inspection...")
+            page.wait_for_timeout(4000)
+            logger.info("[UI TEST] Clicking Generate AI Variations...")
             page.click("#generate-btn")
             
             logger.info("[UI TEST] Waiting for status message update (live pipeline — up to 120s)...")
@@ -216,6 +218,8 @@ def main():
             logger.info("[UI TEST] Filling caption-editor with approved text...")
             page.fill("#caption-editor", "Superb 3BHK Sector 1 Noida Extension. Contact: +91-9999999999.")
             
+            logger.info("[UI TEST] Cockpit loaded. Pausing 4s for audience inspection...")
+            page.wait_for_timeout(4000)
             logger.info("[UI TEST] Clicking approve-btn...")
             page.click("#approve-btn")
             
