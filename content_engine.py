@@ -59,6 +59,9 @@ def extract_visual_specs(image_paths: list[str]) -> dict:
         return json.loads(clean_text)
     except Exception as exc:
         print(f"[Brain 1 - Vision] Parsing error or timeout: {exc}")
+        exc_str = str(exc).lower()
+        if "429" in exc_str or "quota" in exc_str:
+            raise exc
         return {"error": "Visual extraction bypassed due to processing limits"}
 
 
@@ -126,6 +129,9 @@ def generate_captions(
         ]
     except Exception as exc:
         print(f"[Brain 2 - Copywriter] Generation failed or rate-limited: {exc}")
+        exc_str = str(exc).lower()
+        if "429" in exc_str or "quota" in exc_str:
+            raise exc
         print("[Brain 2 - Copywriter] Falling back to high-conversion Noida Extension marketing copy.")
         fallback_variation = f"""Call and WhatsApp on {contact_number} ✨Luxurious flat available for rent 
 📍Location: Noida Extension 

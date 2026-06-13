@@ -279,6 +279,10 @@ def list_listings() -> list[dict[str, Any]]:
             "id, profile_id, status, generated_captions, final_approved_text, original_assets"
         ).order("created_at", desc=True).execute()
         listings = response.data
+        for lst in listings:
+            caps = lst.get("generated_captions")
+            if isinstance(caps, dict) and "variations" in caps:
+                lst["generated_captions"] = caps["variations"]
     except Exception as exc:
         print(f"[api] Failed to fetch listings: {exc}")
         raise HTTPException(status_code=500, detail="Failed to fetch listings.") from exc

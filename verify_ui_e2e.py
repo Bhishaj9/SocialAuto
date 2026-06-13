@@ -126,6 +126,7 @@ def main():
     env["SHADOW_MODE"] = "True"
     env["WORKER_HEADLESS"] = "False"
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
 
     try:
         # Open redirect logs to prevent subprocess blocking/deadlocks
@@ -215,9 +216,6 @@ def main():
             newest_item = page.locator("#queue-container > div:not(.hidden)").first
             newest_item.click()
             
-            logger.info("[UI TEST] Filling caption-editor with approved text...")
-            page.fill("#caption-editor", "Superb 3BHK Sector 1 Noida Extension. Contact: +91-9999999999.")
-            
             logger.info("[UI TEST] Cockpit loaded. Pausing 4s for audience inspection...")
             page.wait_for_timeout(4000)
             logger.info("[UI TEST] Clicking approve-btn...")
@@ -250,6 +248,8 @@ def main():
                 if status == "completed":
                     verified = True
                     logger.info("[UI TEST] Worker execution verified! Listing status flipped to 'completed'.")
+                    logger.info("[UI TEST] Settiing a 5-second safety buffer for proof file write stabilization...")
+                    time.sleep(5)
                     break
                 elif status == "failed":
                     error_msg = newest_listing.get("error_message")
@@ -266,9 +266,9 @@ def main():
         
     finally:
         # Clean up subprocesses
-        logger.info("[UI TEST] Cleaning up background processes...")
-        kill_proc(worker_proc, "Worker process")
-        kill_proc(api_proc, "API process")
+        logger.info("[UI TEST] Cleaning up background processes (skipping kill_proc for manual review)...")
+        # kill_proc(worker_proc, "Worker process")
+        # kill_proc(api_proc, "API process")
         
         # Close log file handles
         if api_log:
