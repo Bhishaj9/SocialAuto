@@ -298,6 +298,14 @@ async def _execute_listing(listing: dict[str, Any]) -> None:
                 page: Page = await context.new_page()
                 await page.set_viewport_size(VIEWPORT)
 
+                if os.getenv("AUTOBVB_MOCK_WORKER", "False").lower() in {"1", "true", "yes", "on"}:
+                    print("[Worker] MOCK WORKER MODE - Navigating to https://example.com and capturing screenshot...")
+                    await page.goto("https://example.com")
+                    await _capture_proof(page, listing_id)
+                    db_engine.mark_completed(listing_id)
+                    print(f"[Worker] Listing {listing_id} completed successfully (MOCK).")
+                    return
+
                 # ── Navigate to Facebook ─────────────────────────────────────
                 print("[Worker] Navigating to https://www.facebook.com...")
                 await page.goto("https://www.facebook.com", wait_until="domcontentloaded")

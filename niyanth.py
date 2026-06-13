@@ -74,6 +74,16 @@ def run_governed_pipeline(
     """Orchestrate asset validation and fire the asymmetric Two-Brain generation pipeline."""
     print("[Niyanth - Governor] Activating pipeline operations.")
 
+    if os.getenv("AUTOBVB_MOCK_PIPELINE", "False").lower() in {"1", "true", "yes", "on"}:
+        print("[Niyanth - Governor] MOCK MODE: Bypassing real pipeline. Returning mock captions.")
+        return (
+            "Luxurious 3BHK flat in Noida Extension.\n"
+            "=== VARIATION OVER ===\n"
+            "Premium flat available for immediate rent in Noida Extension.\n"
+            "=== VARIATION OVER ===\n"
+            "Superb 3BHK Sector 1 Noida Extension. Contact: +91-9999999999."
+        )
+
     if not validate_assets(image_paths):
         print("[Niyanth - Governor] Quality Check Denied by Asset Manager.")
         return "ERROR: Images rejected by Asset Manager. Please ensure valid property photos are uploaded."
