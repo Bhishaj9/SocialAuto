@@ -92,7 +92,7 @@ def _read_listings() -> list[dict]:
         with urllib.request.urlopen(req, timeout=5) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
-                return data.get("listings", [])
+                return data if isinstance(data, list) else data.get("listings", [])
     except Exception:
         pass
     return []
@@ -386,10 +386,10 @@ def main() -> None:
         for entry in final_listings:
             eid = entry.get("id", "?")
             estat = entry.get("status", "?")
-            etext = entry.get("final_text", "")[:60]
+            etext = (entry.get("final_approved_text") or entry.get("final_text") or "")[:60]
             print(f"    {eid[:16]}... -> status={estat}")
             print(f"      text: {etext}...")
-            paths = entry.get("image_paths", [])
+            paths = entry.get("original_assets") or entry.get("image_paths") or []
             for p in paths:
                 print(f"      img URL: {p}")
         print("  --- end listings ---")

@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from database import DatabaseEngine
@@ -21,6 +22,14 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOCAL_STORAGE_DIR = Path(os.getenv("AUTOBVB_LOCAL_STORAGE", "/app/local_storage"))
 
 app = FastAPI(title="AutoBVB Listings Bridge", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize Engine Singletons
 db_engine = DatabaseEngine()
@@ -245,12 +254,15 @@ async def upload_account_state(
 
 
 @app.get("/api/listings")
-def list_listings() -> dict[str, list[dict[str, Any]]]:
+def list_listings() -> list[dict[str, Any]]:
     try:
-        listings = db_engine.list_listings()
+        response = db_engine.client.table("listings").select(
+            "id, profile_id, status, generated_captions, final_approved_text, original_assets"
+        ).order("created_at", desc=True).execute()
+        listings = response.data
     except Exception as exc:
-        print(f"[api] Failed to list listings: {exc}")
+        print(f"[api] Failed to fetch listings: {exc}")
         raise HTTPException(status_code=500, detail="Failed to fetch listings.") from exc
 
     print(f"[api] Returning {len(listings)} listing status record(s).")
-    return {"listings": listings}
+    return listings

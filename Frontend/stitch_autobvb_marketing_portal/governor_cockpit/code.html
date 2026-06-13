@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Governor Cockpit - AutoBVB</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                            "surface": "#faf9f5",
+                            "primary": "#8f482f",
+                            "secondary-container": "#e6e2de",
+                            "on-primary-fixed-variant": "#75331c",
+                            "on-secondary-container": "#666461",
+                            "tertiary": "#5f5c53",
+                            "surface-bright": "#faf9f5",
+                            "primary-active": "#a9583e",
+                            "tertiary-container": "#78746b",
+                            "inverse-surface": "#2f312e",
+                            "on-tertiary-fixed-variant": "#49473f",
+                            "surface-dark-elevated": "#252320",
+                            "surface-container-low": "#f4f4f0",
+                            "background": "#faf9f5",
+                            "tertiary-fixed-dim": "#cbc6bb",
+                            "surface-dim": "#dbdad6",
+                            "tertiary-fixed": "#e8e2d7",
+                            "inverse-primary": "#ffb59d",
+                            "on-surface-variant": "#54433e",
+                            "surface-tint": "#924a31",
+                            "on-secondary": "#ffffff",
+                            "secondary-fixed": "#e6e2de",
+                            "on-surface": "#1b1c1a",
+                            "on-primary-container": "#fffbff",
+                            "secondary": "#605e5b",
+                            "secondary-fixed-dim": "#cac6c2",
+                            "on-tertiary-container": "#fffbff",
+                            "surface-container-high": "#e9e8e4",
+                            "on-primary-fixed": "#390c00",
+                            "on-error-container": "#93000a",
+                            "on-secondary-fixed": "#1c1b19",
+                            "outline-variant": "#dac1ba",
+                            "error-container": "#ffdad6",
+                            "surface-container-lowest": "#ffffff",
+                            "on-tertiary": "#ffffff",
+                            "primary-fixed-dim": "#ffb59d",
+                            "on-secondary-fixed-variant": "#484644",
+                            "primary-fixed": "#ffdbd0",
+                            "surface-variant": "#e3e2df",
+                            "accent-teal": "#5db8a6",
+                            "on-background": "#1b1c1a",
+                            "surface-container": "#efeeea",
+                            "error": "#c64545",
+                            "inverse-on-surface": "#f2f1ed",
+                            "surface-container-highest": "#e3e2df",
+                            "primary-container": "#ad5f45",
+                            "outline": "#87736d",
+                            "on-tertiary-fixed": "#1d1b15",
+                            "hairline": "#e6dfd8",
+                            "ink": "#141413",
+                            "on-error": "#ffffff",
+                            "on-primary": "#ffffff"
+                    },
+                    "borderRadius": {
+                            "DEFAULT": "0.25rem",
+                            "lg": "0.5rem",
+                            "xl": "0.75rem",
+                            "full": "9999px"
+                    },
+                    "spacing": {
+                            "xl": "32px",
+                            "md": "16px",
+                            "sm": "12px",
+                            "section": "96px",
+                            "lg": "24px",
+                            "base": "4px",
+                            "xs": "8px"
+                    },
+                    "fontFamily": {
+                            "headline-lg-mobile": [
+                                    "\"Source Serif 4\""
+                            ],
+                            "display-xl": [
+                                    "\"Source Serif 4\""
+                            ],
+                            "title-md": [
+                                    "Inter"
+                            ],
+                            "caption-up": [
+                                    "Inter"
+                            ],
+                            "body-md": [
+                                    "Inter"
+                            ],
+                            "display-md": [
+                                    "\"Source Serif 4\""
+                            ],
+                            "code": [
+                                    "jetbrainsMono"
+                            ],
+                            "display-sm": [
+                                    "\"Source Serif 4\""
+                            ],
+                            "display-lg": [
+                                    "\"Source Serif 4\""
+                            ]
+                    },
+                    "fontSize": {
+                            "headline-lg-mobile": [
+                                    "32px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "letterSpacing": "-0.5px",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "display-xl": [
+                                    "64px",
+                                    {
+                                            "lineHeight": "1.05",
+                                            "letterSpacing": "-1.5px",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "title-md": [
+                                    "18px",
+                                    {
+                                            "lineHeight": "1.4",
+                                            "letterSpacing": "0",
+                                            "fontWeight": "500"
+                                    }
+                            ],
+                            "caption-up": [
+                                    "12px",
+                                    {
+                                            "lineHeight": "1.4",
+                                            "letterSpacing": "1.5px",
+                                            "fontWeight": "600"
+                                    }
+                            ],
+                            "body-md": [
+                                    "16px",
+                                    {
+                                            "lineHeight": "1.55",
+                                            "letterSpacing": "0",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "display-md": [
+                                    "36px",
+                                    {
+                                            "lineHeight": "1.15",
+                                            "letterSpacing": "-0.5px",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "code": [
+                                    "14px",
+                                    {
+                                            "lineHeight": "1.6",
+                                            "letterSpacing": "0",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "display-sm": [
+                                    "28px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "letterSpacing": "-0.3px",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "display-lg": [
+                                    "48px",
+                                    {
+                                            "lineHeight": "1.1",
+                                            "letterSpacing": "-1px",
+                                            "fontWeight": "400"
+                                    }
+                            ]
+                    }
+            },
+                },
+        }
+    </script>
+</head>
+<body class="bg-surface text-on-surface font-body-md antialiased h-screen overflow-hidden flex">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col bg-surface-container-low dark:bg-surface-dark-elevated border-r border-hairline h-screen w-64 left-0 top-0 fixed left-0 top-0 h-full flex flex-col p-lg gap-lg flat no shadows z-50">
+<div class="flex items-center gap-md mb-xl">
+<div class="w-10 h-10 rounded-full bg-surface-container-high overflow-hidden flex items-center justify-center shrink-0">
+<img alt="Organization Logo" class="w-full h-full object-cover" data-alt="A refined, abstract logo mark signifying a high-end editorial property partner. The logo is set against a clean, warm cream background, fitting perfectly within a professional, literary real estate application. The style is minimalist and sophisticated, employing a palette of soft creams and sharp navy or coral accents. Soft, ambient lighting highlights the precise geometry of the mark." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC52UXFhnVDFNLgeVbc_wCF4I4cXVHEB8Fqh61ljCunbE5XYnfD2lPQaAaA0hQ3pS5iOVhcMJx9yeQf19fMwfCPsUYPTQ6A4BzQmjWw379rqvWEAkRMBj8NjggC2W4qxKSluQeTC1jDwrSXWALtt5jtPExgBKfpmTPDvyayrnrSgyM7JF5i5S-_RLXEonixUCYFcbD_uISo3I0jcWYbEA8RX-qG4UCSfDPS2uWoRDpf7gRXsKPVTGfwPX98aTSk1ollphN635HrCNhk"/>
+</div>
+<div>
+<h1 class="font-display-md text-display-md text-primary dark:text-inverse-primary tracking-tight leading-none">AutoBVB</h1>
+<p class="font-caption-up text-caption-up text-secondary uppercase mt-base">Editorial Partner</p>
+</div>
+</div>
+<button class="w-full bg-primary text-on-primary py-[12px] px-md rounded-lg font-title-md text-title-md hover:bg-primary-active transition-colors mb-lg shadow-sm">
+            Create Listing
+        </button>
+<div class="flex flex-col gap-sm flex-1 overflow-y-auto">
+<a class="flex items-center gap-md text-secondary dark:text-secondary-fixed-dim px-md py-sm hover:bg-surface-container-high dark:hover:bg-surface-container-highest transition-colors scale-98 active:scale-95 transition-transform rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+                Dashboard
+            </a>
+<a class="flex items-center gap-md bg-secondary-container dark:bg-tertiary-container text-on-secondary-container dark:text-on-tertiary-container rounded-lg px-md py-sm hover:bg-surface-container-high dark:hover:bg-surface-container-highest transition-colors scale-98 active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" data-icon="home_work">home_work</span>
+                Property Library
+            </a>
+<a class="flex items-center gap-md text-secondary dark:text-secondary-fixed-dim px-md py-sm hover:bg-surface-container-high dark:hover:bg-surface-container-highest transition-colors scale-98 active:scale-95 transition-transform rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
+                Marketing Studio
+            </a>
+<a class="flex items-center gap-md text-secondary dark:text-secondary-fixed-dim px-md py-sm hover:bg-surface-container-high dark:hover:bg-surface-container-highest transition-colors scale-98 active:scale-95 transition-transform rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+                Team Settings
+            </a>
+</div>
+<div class="mt-auto pt-lg border-t border-hairline flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high overflow-hidden">
+<img alt="User" class="w-full h-full object-cover" data-alt="A professional headshot of a mature male real estate agent with a warm smile. He is wearing a tailored navy blazer over a crisp white shirt. The background is a soft, blurred modern office environment with subtle warm lighting. The overall mood is approachable, trustworthy, and premium, fitting an editorial real estate brand." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCFwQGP7_q5Bv_nxLCClb2CIRLJQjPVT25YL5md3r7RGh8BVJtXGebBzLoj1eo8PbgCbOmKfWP_gmtHwFju6nuyNYWz27HI24LXF9orVFqiDgqCjvGOlUmC7wmOzkkcPYaj2hFR66QomHk9bkz8gbQsglLODnZ8cF7zmRfxIxYg3E7OsskBxeIZpUYrc0oR6njoA2grU9uEgEWbHdhsJMMvIcsTe_HtgxboeGzxWKP90IUSnRqUXgqwt8mN2epyELsGZK5xaGo8Ux0Q"/>
+</div>
+<div class="flex flex-col">
+<span class="font-title-md text-title-md text-ink text-sm">Manager View</span>
+</div>
+</div>
+<button class="text-secondary hover:text-ink transition-colors">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+</button>
+</div>
+</nav>
+<!-- Main Content Workspace -->
+<main class="ml-0 md:ml-64 flex-1 h-screen overflow-hidden flex flex-col bg-surface">
+<!-- Top Utility Bar (Mobile & Contextual) -->
+<header class="h-16 border-b border-hairline flex items-center justify-between px-lg md:px-xl shrink-0 bg-surface">
+<div class="flex items-center gap-md">
+<button class="md:hidden text-ink">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<h2 class="font-display-sm text-display-sm text-ink tracking-tight">Governor Cockpit</h2>
+</div>
+<div class="flex items-center gap-md">
+<span class="font-caption-up text-caption-up text-secondary uppercase bg-surface-container px-sm py-base rounded-full">Review Queue: 12</span>
+</div>
+</header>
+<!-- Workspace Area -->
+<div class="flex-1 overflow-hidden flex p-lg md:p-xl gap-xl">
+<!-- Left Queue Panel -->
+<div class="w-full max-w-[280px] hidden lg:flex flex-col border-r border-hairline pr-xl h-full">
+<div class="flex items-center justify-between mb-lg">
+<h3 class="font-title-md text-title-md text-ink">Active Codes</h3>
+<button class="text-secondary hover:text-ink"><span class="material-symbols-outlined" data-icon="filter_list">filter_list</span></button>
+</div>
+<div class="flex-1 overflow-y-auto pr-sm space-y-md custom-scrollbar">
+<!-- Queue Item Active -->
+<div class="p-md rounded-xl bg-surface-container border-l-2 border-primary cursor-pointer transition-colors">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-code text-code text-ink font-medium">BVB-892A</span>
+<span class="px-2 py-1 rounded-full bg-surface text-ink font-caption-up text-[10px] uppercase border border-hairline">Pending</span>
+</div>
+<p class="font-body-md text-sm text-secondary truncate">142 Highland Terrace</p>
+</div>
+<!-- Queue Item -->
+<div class="p-md rounded-xl hover:bg-surface-container border border-transparent cursor-pointer transition-colors">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-code text-code text-ink font-medium">BVB-891F</span>
+<span class="px-2 py-1 rounded-full bg-primary text-on-primary font-caption-up text-[10px] uppercase">Approved</span>
+</div>
+<p class="font-body-md text-sm text-secondary truncate">88 Beacon Street, Unit 4</p>
+</div>
+<!-- Queue Item -->
+<div class="p-md rounded-xl hover:bg-surface-container border border-transparent cursor-pointer transition-colors">
+<div class="flex justify-between items-start mb-sm">
+<span class="font-code text-code text-ink font-medium">BVB-890C</span>
+<span class="px-2 py-1 rounded-full bg-surface text-ink font-caption-up text-[10px] uppercase border border-hairline">Pending</span>
+</div>
+<p class="font-body-md text-sm text-secondary truncate">200 Clarendon Suite 10</p>
+</div>
+</div>
+</div>
+<!-- Center Feature Layout Card -->
+<div class="flex-1 flex flex-col md:flex-row bg-[#efe9de] rounded-xl overflow-hidden shadow-sm h-full">
+<!-- Left Half: Visual Property Photo Frame -->
+<div class="w-full md:w-1/2 h-64 md:h-full relative overflow-hidden bg-surface-container-high">
+<img alt="Property Exterior" class="w-full h-full object-cover" data-alt="A high-end architectural photograph of a luxurious modern home exterior at twilight. The house features clean geometric lines, large expansive glass windows emitting a warm inviting glow, and natural stone accents. The composition is highly symmetrical and polished, suitable for a premium real estate magazine spread. The surrounding landscaping is minimalist and manicured." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCMkcV5oDfcV4VLjWXKG7js9B8j9OH-QIKObZ8D4KcMP76lOqgaG4DI4RPK9u8figsQ6Pc4rWN1mlg08l58WjmbfSKdRr9gzDFh9zHYjSZhfXtih5sdLrYyd4_OTxL8YnQBY7ZcUqvsPoD3Wq-oN8m7p_Fb529sTYhigq_QMJSKtaNvHHiyCd5prRCqTjHyBS832OY1BGD_sRcdkQ1ymqcBqTw2eLHVzmYPimuvQ94oc_AyVuKmsoxyNuNF3GDBFygBBNdSSn55ZaHU"/>
+<div class="absolute top-lg left-lg right-lg flex justify-between items-start">
+<div class="bg-surface/90 backdrop-blur-sm px-md py-sm rounded-lg border border-hairline/50">
+<span class="font-code text-code text-ink block mb-1">BVB-892A</span>
+<span class="font-title-md text-title-md text-ink">142 Highland Terrace</span>
+</div>
+<button class="w-10 h-10 rounded-full bg-surface/90 backdrop-blur-sm flex items-center justify-center text-ink hover:bg-white transition-colors border border-hairline/50">
+<span class="material-symbols-outlined" data-icon="open_in_new">open_in_new</span>
+</button>
+</div>
+<div class="absolute bottom-lg left-lg right-lg flex gap-sm overflow-x-auto pb-2 no-scrollbar">
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-primary shrink-0">
+<img alt="Thumb 1" class="w-full h-full object-cover" data-alt="Thumbnail view of a modern luxury home exterior at twilight, featuring expansive windows and warm interior lighting. High contrast and sharp focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfP_lfkop4wU7lEaip9EUA18K2Fh6FWLEfa2gY9L6zO3mjnvFxBzDWJSC6eAdfKIJG2G-VgZUiPmgIrz7g5l89Tb86c-CklJDxp-rGs7Tagg63cW8NeYj1mUX1cN8bQzrC-HS9zDPNmsWsRAGAItXP2ZbrYmsU4nSobVZkkLbRQfkbldxqkZ1N4iWvehhUjK4GQ_fUu5oFYy11LZKvgzbtaCWvJehsPdF_XKdzoWBAkcsqRHQgMsIQgSQzVXx1WBRvpLNhUW-kD0dz"/>
+</div>
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-transparent opacity-70 hover:opacity-100 transition-opacity cursor-pointer shrink-0">
+<img alt="Thumb 2" class="w-full h-full object-cover" data-alt="Thumbnail view of a luxurious, minimalist living room with wide plank oak floors, a modern fireplace, and floor-to-ceiling windows overlooking a serene landscape. Bright, soft natural light." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCpgxZlu7YUY6b1Z-i7KPJn6Kcln9AQgAfZF7H8anqZNU4w9S-dZ0P9QXQ12Ng9kyIe5_rFtT1KDaomGAT65lUIVmfkvEh_qFy2J4oivVQpA6gSYIR2iGqqxFCO01x8k07MdSp4fPFxE8MG9xOkFs1Ha5JaBpDWRZNg-r2crVyX6BMv_BcNObq0whbH9UQlk-MP04MQ3LvLDKv-cN1AAwurhj4rJEQRRm-gIBQkD_kuLWmxxVPMvjoMWJe7fWJDSMygLrkVbifzWRlN"/>
+</div>
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-transparent opacity-70 hover:opacity-100 transition-opacity cursor-pointer shrink-0">
+<img alt="Thumb 3" class="w-full h-full object-cover" data-alt="Thumbnail view of a high-end chef's kitchen featuring seamless white marble countertops, dark matte cabinetry, and state-of-the-art integrated appliances. Crisp and clean aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnbFpfGK0vfzpm8Zl5sSD9TKs0XrCr7MUrL6-ZNbEuvvLdwNdVYw9sXW_Pe-nrcH72bIQI6BL0aC2flFM72W6qOqROsE8L-j66hWC0ossCLnwmqr7FO5AwrONpeOtrzINC5J0zJWBsmSkdrcHMwyTjXy89l_bSdBPwcSee5cG4K8j7wb2CxpzDIR-W2t5bdelopq0OU7t4Cd2C9z5kAydjkkrQ3BcJur8jPS1vORCQ9fK59DUMOt8mMZzz6jDBXOC8gV1TwXysL2pt"/>
+</div>
+</div>
+</div>
+<!-- Right Half: Dark Navy Product Chrome Panel -->
+<div class="w-full md:w-1/2 h-full bg-[#181715] flex flex-col relative">
+<div class="p-xl flex-1 flex flex-col overflow-y-auto custom-scrollbar-dark">
+<div class="flex items-center gap-sm mb-lg">
+<span class="material-symbols-outlined text-primary" data-icon="auto_awesome">auto_awesome</span>
+<h4 class="font-title-md text-title-md text-surface">AI Narrative Variant</h4>
+</div>
+<div class="flex flex-col gap-md flex-1">
+<label class="font-caption-up text-caption-up text-tertiary-fixed-dim uppercase tracking-wider">Editorial Copy</label>
+<textarea class="w-full flex-1 bg-transparent border border-[#2f312e] rounded-lg p-md font-body-md text-surface focus:border-primary focus:ring-0 resize-none transition-colors leading-relaxed" placeholder="Review and edit the narrative...">Nestled in the prestigious highlands, this architectural masterpiece seamlessly blends contemporary precision with organic warmth. The expansive open-plan living spaces are anchored by floor-to-ceiling glass, inviting the majestic surrounding landscape indoors. A chef's kitchen, clad in honed marble and bespoke walnut cabinetry, serves as the heart of the home, ideal for both intimate gatherings and grand-scale entertaining. Every detail, from the wide-plank European oak flooring to the custom architectural lighting, has been meticulously curated to offer an unparalleled standard of modern luxury.</textarea>
+</div>
+<div class="mt-lg pt-lg border-t border-[#2f312e] flex flex-col gap-sm">
+<div class="flex justify-between items-center text-sm">
+<span class="text-tertiary-fixed-dim font-body-md">Tone Setting</span>
+<span class="text-surface font-title-md">Sophisticated &amp; Restrained</span>
+</div>
+<div class="flex justify-between items-center text-sm">
+<span class="text-tertiary-fixed-dim font-body-md">Word Count</span>
+<span class="text-surface font-title-md">86 / 150 Max</span>
+</div>
+</div>
+</div>
+<!-- Bottom Action Row -->
+<div class="p-xl bg-[#181715] border-t border-[#2f312e] flex gap-md mt-auto shrink-0">
+<button class="flex-1 bg-primary text-on-primary font-title-md text-title-md py-[14px] px-lg rounded-lg hover:bg-primary-active transition-colors flex items-center justify-center gap-sm">
+<span class="material-symbols-outlined text-sm" data-icon="lock">lock</span>
+                            Lock &amp; Release to Worker Queue
+                        </button>
+<button class="px-lg py-[14px] bg-transparent border border-[#2f312e] text-surface font-title-md text-title-md rounded-lg hover:bg-[#252320] transition-colors flex items-center justify-center">
+                            Reject Variant
+                        </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<style>
+        /* Custom scrollbars for a cleaner look */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #e6dfd8;
+            border-radius: 4px;
+        }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+            background: #dbdad6;
+        }
+
+        .custom-scrollbar-dark::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar-dark::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar-dark::-webkit-scrollbar-thumb {
+            background: #2f312e;
+            border-radius: 4px;
+        }
+        .custom-scrollbar-dark:hover::-webkit-scrollbar-thumb {
+            background: #54433e;
+        }
+        
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</body></html>

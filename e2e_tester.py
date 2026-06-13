@@ -163,7 +163,8 @@ def _read_listing_status(draft_id: str) -> str | None:
         response = requests.get(f"{API_BASE_URL}/api/listings", timeout=10)
         if response.status_code == 200:
             payload = response.json()
-            for listing in payload.get("listings", []):
+            listings = payload if isinstance(payload, list) else payload.get("listings", [])
+            for listing in listings:
                 if listing.get("id") == draft_id:
                     return listing.get("status")
     except Exception as exc:
